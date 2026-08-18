@@ -20,7 +20,7 @@ string[] paths =
 string modelPath = paths[1];
 
 // 1. Initialize
-IBackend backend = BackendRuntime.Instance.GetBackend("Scalar");
+IBackend backend = BackendRuntime.Instance.GetBackend("Vector");
 
 // 2. Load Model
 Console.WriteLine("Loading model...");

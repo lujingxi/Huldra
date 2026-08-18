@@ -16,16 +16,38 @@ public static class ModelFactory
             throw new InvalidOperationException("Model architecture not found in metadata.");
         }
 
+        ModelArchitecture architecture = ModelArchitectureResolver.Resolve(arch);
         var config = ExtractConfig(reader.Metadata);
         var tensors = LoadTensors(filePath, reader.Tensors);
         var tokenizer = new LlamaTokenizer(reader.Metadata);
 
         // Route to specific model implementation based on architecture
-        return arch switch
+        return architecture switch
         {
-            "llama" or "qwen2" or "qwen3" or "mistral" => new LlamaModel { Config = config, Tensors = tensors, Tokenizer = tokenizer },
-            "gemma" or "gemma2" or "gemma3" or "gemma4" => new GemmaModel { Config = config, Tensors = tensors, Tokenizer = tokenizer },
-            _ => throw new NotSupportedException($"Architecture '{arch}' is not supported yet.")
+            ModelArchitecture.Llama or
+            ModelArchitecture.Qwen2 or
+            ModelArchitecture.Qwen3 or
+            ModelArchitecture.Mistral
+                => new LlamaModel
+                {
+                    Config = config,
+                    Tensors = tensors,
+                    Tokenizer = tokenizer
+                },
+
+            ModelArchitecture.Gemma or
+            ModelArchitecture.Gemma2 or
+            ModelArchitecture.Gemma3 or
+            ModelArchitecture.Gemma4
+                => new GemmaModel
+                {
+                    Config = config,
+                    Tensors = tensors,
+                    Tokenizer = tokenizer
+                },
+
+            _ => throw new NotSupportedException(
+                $"Architecture '{architecture}' is not supported.")
         };
     }
 
