@@ -1,0 +1,40 @@
+﻿@using Huldra.Agent.Models
+@using Huldra.Shared.Components.Icons
+
+<div class="chat-container">
+    <div class="messages-area">
+        @foreach (var msg in Messages)
+        {
+            <div class="msg-row @(msg.Sender.Contains("User") ? "me" : "ai")">
+                <div class="msg-bubble @(msg.IsMemo ? "memo-alert" : "")">
+                    <strong>@msg.Sender</strong>
+                    <pre>@msg.Content</pre>
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="input-area">
+        <textarea @bind="_inputText" @onkeyup="HandleKeyPress" placeholder="Type a message or memo..."></textarea>
+        <button class="fluent-btn btn-recommended send-btn" @onclick="Send">
+            <PaperPlaneIcon width="18" height="18" />
+        </button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public List<SessionMessage> Messages { get; set; } = [];
+    [Parameter] public EventCallback<string> OnSendMessage { get; set; }
+
+    private string _inputText = string.Empty;
+
+    private async Task Send()
+    {
+        if (!string.IsNullOrWhiteSpace(_inputText))
+        {
+            await OnSendMessage.InvokeAsync(_inputText);
+            _inputText = string.Empty;
+        }
+    }
+    private void HandleKeyPress(KeyboardEventArgs e) { if (e.Key == "Enter" && e.CtrlKey) _ = Send(); }
+}

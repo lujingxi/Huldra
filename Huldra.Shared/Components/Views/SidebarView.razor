@@ -1,0 +1,147 @@
+﻿@using Microsoft.JSInterop
+@using Huldra.Shared.ViewModels
+@using Huldra.Shared.Components.Icons
+@inject IJSRuntime JSRuntime
+@implements IAsyncDisposable
+
+<div class="sidebar-container">
+
+    <!-- TOP: Menu Buttons (Add & History) -->
+    <div class="sidebar-top">
+        <button class="fluent-btn btn-transparent sidebar-action-btn" title="Add Session" @onclick="ToggleAddMenu">
+            <AddIcon width="20" height="20" />
+        </button>
+
+        @if (_showAddMenu)
+        {
+            <div class="flyout-menu">
+                <button class="fluent-btn btn-transparent" @onclick="() => { OnCreateSession.InvokeAsync(false); _showAddMenu = false; }">
+                    <ChatIcon style="width: 14px; height: 14px; margin-right: 6px; vertical-align: middle;" /> New Chat
+                </button>
+                <button class="fluent-btn btn-transparent" @onclick="() => { OnCreateSession.InvokeAsync(true); _showAddMenu = false; }">
+                    <WorkspaceIcon style="width: 14px; height: 14px; margin-right: 6px; vertical-align: middle;" /> New Workspace
+                </button>
+            </div>
+        }
+
+        <button class="fluent-btn btn-transparent sidebar-action-btn" title="History (Closed Sessions)">
+            <HistoryIcon width="18" height="18" />
+        </button>
+    </div>
+
+    <!-- MIDDLE: Flexible Session List with auto-showing scroll buttons -->
+    <div class="sidebar-middle">
+        @if (_canScroll)
+        {
+            <button class="fluent-btn btn-transparent scroll-btn" @onclick="ScrollUp">▲</button>
+        }
+
+        <div class="session-list" id="sessionList">
+            @foreach (var vm in Sessions)
+            {
+                <div class="session-item-container" @onclick="() => OnSessionSelected.InvokeAsync(vm)">
+                    <div class="session-tile @(vm.Model.Id == ActiveSession?.Model.Id ? "active" : "")"
+                         style="background-color: @vm.BackgroundColor;">
+
+                        <!-- 首字母 -->
+                        <span>@GetFirstLetter(vm.Model.Name)</span>
+
+                        <!-- 裝飾物 Badge -->
+                        <div class="badge-decorator">
+                            @if (vm is ChatSessionViewModel)
+                            {
+                                <ChatIcon class="flat-icon" />
+                            }
+                            else
+                            {
+                                <WorkspaceIcon class="flat-icon" />
+                            }
+                        </div>
+                    </div>
+
+                    <!-- Hover 顯示全名 Tooltip -->
+                    <span class="tile-tooltip">@vm.Model.Name</span>
+
+                    <!-- 關閉 Session 按鈕 (唔係刪除，只係由左邊欄移除) -->
+                    <button class="tile-close-btn" title="Close Session" @onclick:stopPropagation="true" @onclick="() => OnSessionClosed.InvokeAsync(vm)">×</button>
+                </div>
+            }
+        </div>
+
+        @if (_canScroll)
+        {
+            <button class="fluent-btn btn-transparent scroll-btn" @onclick="ScrollDown">▼</button>
+        }
+    </div>
+
+    <!-- BOTTOM: Settings Menu Button -->
+    <div class="sidebar-bottom">
+        <button class="fluent-btn btn-transparent sidebar-action-btn" title="Settings">
+            <SettingsIcon width="20" height="20" />
+        </button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public List<SessionViewModel> Sessions { get; set; } = [];
+    [Parameter] public SessionViewModel? ActiveSession { get; set; }
+    [Parameter] public EventCallback<SessionViewModel> OnSessionSelected { get; set; }
+    [Parameter] public EventCallback<SessionViewModel> OnSessionClosed { get; set; }
+    [Parameter] public EventCallback<bool> OnCreateSession { get; set; }
+
+    private bool _showAddMenu = false;
+    private bool _canScroll = false;
+    private IJSObjectReference? _jsModule;
+
+    private void ToggleAddMenu() => _showAddMenu = !_showAddMenu;
+
+    private string GetFirstLetter(string text)
+    {
+        var clean = text?.Trim() ?? "";
+        return clean.Length > 0 ? clean[0].ToString().ToUpper() : "H";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                _jsModule = await JSRuntime.InvokeAsync<IJSObjectReference>(
+                    "import", "./_content/Huldra.Shared/Components/Views/SidebarView.razor.js");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SidebarView] Failed to load JS module: {ex.Message}");
+            }
+        }
+
+        if (_jsModule != null)
+        {
+            var overflows = await _jsModule.InvokeAsync<bool>("checkOverflow", "sessionList");
+            if (overflows != _canScroll)
+            {
+                _canScroll = overflows;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task ScrollUp()
+    {
+        if (_jsModule != null) await _jsModule.InvokeVoidAsync("scrollByAmount", "sessionList", -60);
+    }
+
+    private async Task ScrollDown()
+    {
+        if (_jsModule != null) await _jsModule.InvokeVoidAsync("scrollByAmount", "sessionList", 60);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_jsModule is not null)
+        {
+            await _jsModule.DisposeAsync();
+        }
+    }
+}

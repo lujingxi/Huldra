@@ -1,0 +1,500 @@
+﻿@using System.IO
+@using Huldra.Shared.ViewModels
+@using Huldra.Agent.Models
+@using Huldra.Agent.Services
+@using Huldra.Shared.Components.Views
+@implements IDisposable
+
+<style>
+    /* Fluent 2 Design System Variables */
+    :root {
+        --bg-app: #f3f3f3;
+        --bg-sidebar: #ebebeb;
+        --bg-card: #ffffff;
+        --bg-input: #ffffff;
+        --text-main: #242424;
+        --text-muted: #616161;
+        --border-color: #e0e0e0;
+        --border-radius: 6px;
+        --btn-default-bg: #005FB8;
+        --btn-default-fg: #ffffff;
+        --btn-danger-bg: #D13438;
+        --btn-danger-fg: #ffffff;
+        --btn-recommended-bg: #107C10;
+        --btn-recommended-fg: #ffffff;
+        --btn-disabled-bg: #cccccc;
+        --btn-disabled-fg: #888888;
+        --hover-overlay: rgba(0, 0, 0, 0.05);
+    }
+
+    @@media (prefers-color-scheme: dark) {
+        :root {
+            --bg-app: #202020;
+            --bg-sidebar: #2d2d2d;
+            --bg-card: #2b2b2b;
+            --bg-input: #333333;
+            --text-main: #ffffff;
+            --text-muted: #a0a0a0;
+            --border-color: #404040;
+            --btn-default-bg: #4DA8DA;
+            --btn-default-fg: #000000;
+            --btn-disabled-bg: #444444;
+            --hover-overlay: rgba(255, 255, 255, 0.08);
+        }
+    }
+
+    /* UNIFIED FLUENT 2 BUTTON STYLES */
+    .fluent-btn {
+        border-radius: var(--border-radius);
+        border: none;
+        padding: 6px 16px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition: transform 0.1s cubic-bezier(0, 0, 0.5, 1), filter 0.2s;
+    }
+
+        .fluent-btn:hover:not(:disabled) {
+            filter: brightness(0.9);
+        }
+
+        .fluent-btn:active:not(:disabled) {
+            transform: scale(0.95);
+        }
+
+        .fluent-btn:disabled {
+            background-color: var(--btn-disabled-bg) !important;
+            color: var(--btn-disabled-fg) !important;
+            cursor: not-allowed;
+            transform: none;
+            filter: none;
+        }
+
+    .btn-default {
+        background-color: var(--btn-default-bg);
+        color: var(--btn-default-fg);
+    }
+
+    .btn-danger {
+        background-color: var(--btn-danger-bg);
+        color: var(--btn-danger-fg);
+    }
+
+    .btn-recommended {
+        background-color: var(--btn-recommended-bg);
+        color: var(--btn-recommended-fg);
+    }
+
+    .btn-transparent {
+        background-color: transparent;
+        color: var(--text-main);
+        padding: 6px;
+    }
+
+        .btn-transparent:hover:not(:disabled) {
+            background-color: var(--hover-overlay);
+        }
+
+    /* LAYOUT */
+    .huldra-layout {
+        display: grid;
+        grid-template-columns: 60px 1fr;
+        height: 100vh;
+        max-height: 100vh;
+        background-color: var(--bg-app);
+        color: var(--text-main);
+        font-family: 'Segoe UI Variable', 'Segoe UI', sans-serif;
+    }
+
+    .main-content {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        overflow: hidden;
+    }
+</style>
+
+<div class="huldra-layout">
+
+    <SidebarView Sessions="_sessions"
+                 ActiveSession="_activeSession"
+                 OnSessionSelected="SelectSessionAsync"
+                 OnSessionClosed="CloseSessionAsync"
+                 OnCreateSession="(isWorkspace) => CreateSessionAsync(isWorkspace, null)" />
+
+    <div class="main-content">
+        @if (_activeSession == null)
+        {
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:var(--text-muted);">
+                <h2>Welcome to Huldra</h2>
+                <p>Select a session or click '+' to begin.</p>
+            </div>
+        }
+        else
+        {
+            @if (_activeSession is ChatSessionViewModel chatVm)
+            {
+                <ChatSessionView ViewModel="chatVm"
+                                 OnSendMessage="HandleChatSubmittedAsync" />
+            }
+            else if (_activeSession is WorkspaceSessionViewModel wsVm)
+            {
+                <!-- WorkspaceSessionView internally decides layout based on wsVm.IsPreparationPhase -->
+                <WorkspaceSessionView ViewModel="wsVm"
+                                      OnSendMessage="HandleChatSubmittedAsync"
+                                      OnLaunchWorkspace="LaunchWorkspaceExecutionAsync"
+                                      OnStopWorkspace="StopWorkspaceExecution" />
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private List<SessionViewModel> _sessions = new();
+    private SessionViewModel? _activeSession;
+
+    // Core Managers
+    private SessionManager _sessionManager = default!;
+    private ConfigManager _configManager = default!;
+    private AppState _appState = new();
+    private AppConfig _appConfig = new();
+
+    // Execution State
+    private WorkspaceContext? _currentContext;
+    private CancellationTokenSource? _agentCts;
+    private System.Threading.Timer? _syncTimer;
+    private HashSet<string> _renderedMemos = new();
+
+    private static readonly string[] FlatPalette = ["#4A90E2", "#50E3C2", "#F5A623", "#E284B3", "#9B59B6", "#16A085", "#27AE60", "#2980B9", "#8E44AD", "#D35400"];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _sessionManager = new SessionManager();
+        _configManager = new ConfigManager();
+
+        _appState = await _configManager.LoadAppStateAsync();
+        _appConfig = await _configManager.LoadConfigAsync();
+
+        // 1. Load ONLY metadata (Super fast startup!)
+        var allSessionsModels = await _sessionManager.LoadAllSessionsAsync();
+
+        foreach (var model in allSessionsModels)
+        {
+            if (_appState.PinnedSessionIds.Contains(model.Id))
+            {
+                if (model is ChatSession chatModel)
+                {
+                    _sessions.Add(new ChatSessionViewModel(chatModel) { BackgroundColor = GetRandomColor() });
+                }
+                else if (model is WorkspaceSession wsModel)
+                {
+                    var wsVm = new WorkspaceSessionViewModel(wsModel) { BackgroundColor = GetRandomColor() };
+                    string statusFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".huldra", "sessions", wsModel.Id, "status.md");
+                    if (File.Exists(statusFile)) wsVm.IsPreparationPhase = false;
+                    _sessions.Add(wsVm);
+                }
+            }
+        }
+
+        if (_sessions.Count == 0)
+        {
+            await CreateSessionAsync(true, "Huldra Assistant");
+        }
+        else
+        {
+            // Restore last active session and Lazy Load its chat
+            var targetSession = _sessions.FirstOrDefault(s => s.Model.Id == _appState.LastActiveSessionId) ?? _sessions.First();
+            await SelectSessionAsync(targetSession);
+        }
+
+        _syncTimer = new System.Threading.Timer(async _ => await SyncWorkspaceFilesAsync(), null, 1000, 1000);
+    }
+
+    private string GetRandomColor() => FlatPalette[Random.Shared.Next(FlatPalette.Length)];
+
+    private async Task CreateSessionAsync(bool isWorkspace = false, string? customName = null)
+    {
+        SessionViewModel newSession;
+        if (!isWorkspace)
+        {
+            var model = new ChatSession { Name = customName ?? $"Chat {_sessions.Count + 1}" };
+            model.Messages.Add(new SessionMessage { Sender = "Huldra", Content = "How can I help you today?" });
+            newSession = new ChatSessionViewModel(model) { BackgroundColor = GetRandomColor(), IsChatLoaded = true }; // Newly created, chat is loaded
+            await _sessionManager.SaveSessionAsync(model);
+        }
+        else
+        {
+            var model = new WorkspaceSession { Name = customName ?? $"Workspace {_sessions.Count + 1}" };
+            model.Messages.Add(new SessionMessage { Sender = "Conductor", Content = "Welcome to the workspace. What shall we build?" });
+            newSession = new WorkspaceSessionViewModel(model) { BackgroundColor = GetRandomColor(), IsChatLoaded = true };
+            await _sessionManager.SaveSessionAsync(model);
+        }
+
+        _sessions.Add(newSession);
+        _appState.PinnedSessionIds.Add(newSession.Model.Id);
+        await SelectSessionAsync(newSession);
+    }
+
+    private async Task SelectSessionAsync(SessionViewModel session)
+    {
+        if (!session.IsChatLoaded)
+        {
+            session.Model.Messages = await _sessionManager.LoadChatAsync(session.Model.Id);
+            session.IsChatLoaded = true;
+        }
+
+        _activeSession = session;
+        _appState.LastActiveSessionId = session.Model.Id;
+        await _configManager.SaveAppStateAsync(_appState);
+        StateHasChanged();
+    }
+
+    private async Task CloseSessionAsync(SessionViewModel session)
+    {
+        _sessions.Remove(session);
+        _appState.PinnedSessionIds.Remove(session.Model.Id);
+
+        if (_activeSession == session)
+        {
+            _activeSession = _sessions.LastOrDefault();
+            _appState.LastActiveSessionId = _activeSession?.Model.Id;
+        }
+        await _configManager.SaveAppStateAsync(_appState);
+        StateHasChanged();
+    }
+
+    private async Task HandleChatSubmittedAsync(string text)
+    {
+        if (_activeSession == null) return;
+
+        // 1. Add User Message and Save State physically
+        _activeSession.Messages.Add(new SessionMessage { Sender = "User", Content = text });
+        await _sessionManager.SaveSessionAsync(_activeSession.Model);
+        StateHasChanged();
+
+        // 2. Route input based on Phase
+        if (_activeSession is ChatSessionViewModel || (_activeSession is WorkspaceSessionViewModel ws && ws.IsPreparationPhase))
+        {
+            // --- CONVERSATIONAL LLM CHAT MODE ---
+            _activeSession.IsExecuting = true;
+            StateHasChanged();
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var config = await _configManager.LoadConfigAsync();
+                    var llmService = new OpenAiCompatibleService(config.LlmBaseUrl, config.LlmModelName);
+
+                    var chatHistory = _activeSession.Messages.Select(m => new ChatMessage
+                    {
+                        Role = m.Sender.Contains("User") ? ChatRole.User : ChatRole.Assistant,
+                        Content = m.Content
+                    }).ToList();
+
+                    var response = await llmService.GetResponseAsync(chatHistory);
+
+                    await InvokeAsync(async () =>
+                                        {
+                                            _activeSession.Messages.Add(new SessionMessage { Sender = "Huldra", Content = response.Content });
+                                            _activeSession.IsExecuting = false;
+                                            await _sessionManager.SaveSessionAsync(_activeSession.Model);
+                                            StateHasChanged();
+                                        });
+                }
+                catch (Exception ex)
+                {
+                    await InvokeAsync(() =>
+                    {
+                        _activeSession.IsExecuting = false;
+                        _activeSession.Messages.Add(new SessionMessage { Sender = "System Error", Content = ex.Message });
+                        StateHasChanged();
+                    });
+                }
+            });
+        }
+        else if (_activeSession is WorkspaceSessionViewModel execWs && !execWs.IsPreparationPhase)
+        {
+            // --- WORKSPACE EXECUTION MODE (MEMO INJECTION) ---
+            if (_currentContext == null) return;
+            try
+            {
+                string memoFileName = $"memo_gui_{DateTime.UtcNow:yyyyMMdd_HHmmss}.md";
+                string memoFilePath = Path.Combine(_currentContext.MemoDirectory, memoFileName);
+                string content = $"# Visual GUI Memo Interruption\n*Submitted at: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC*\n\n{text}";
+
+                await File.WriteAllTextAsync(memoFilePath, content);
+
+                // Immediately update GUI bubble styles to reflect it as an urgent memo
+                var memoMsg = _activeSession.Messages.Last();
+                memoMsg.IsMemo = true;
+                memoMsg.Sender = "User (Memo)";
+                await _sessionManager.SaveSessionAsync(_activeSession.Model);
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                execWs.LogConsole += $"[UI Error] Failed to submit memo: {ex.Message}\n";
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task LaunchWorkspaceExecutionAsync()
+    {
+        if (_activeSession is WorkspaceSessionViewModel wsVm)
+        {
+            // Align project goal based on the last user chat input during prep phase
+            var lastUserMsg = wsVm.Messages.LastOrDefault(m => m.Sender.Contains("User"))?.Content;
+            if (!string.IsNullOrWhiteSpace(lastUserMsg))
+            {
+                wsVm.WorkspaceModel.ProjectGoal = lastUserMsg;
+            }
+
+            wsVm.IsPreparationPhase = false;
+            wsVm.IsExecuting = true;
+            wsVm.LogConsole += "[UI] Initializing Workspace Loop...\n";
+            await _sessionManager.SaveSessionAsync(wsVm.Model);
+            StateHasChanged();
+
+            _agentCts = new CancellationTokenSource();
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var config = await _configManager.LoadConfigAsync();
+                    var roleManager = new RoleManager();
+                    await roleManager.InitializeCoreRolesAsync();
+
+                    _currentContext = await _sessionManager.InitializeWorkspaceAsync(wsVm.WorkspaceModel);
+
+                    var llmService = new OpenAiCompatibleService(config.LlmBaseUrl, config.LlmModelName);
+
+                    var orchestrator = new AgentOrchestrator(_currentContext, roleManager, llmService, (logMsg) =>
+                                        {
+                                            InvokeAsync(() => { wsVm.LogConsole += $"[{DateTime.Now:HH:mm:ss}] {logMsg}\n"; StateHasChanged(); });
+                                        });
+
+                    await orchestrator.RunLoopAsync(_agentCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    await InvokeAsync(() => wsVm.LogConsole += "[UI] Execution paused safely.\n");
+                }
+                catch (Exception ex)
+                {
+                    await InvokeAsync(() => wsVm.LogConsole += $"[UI Fatal Error] {ex.Message}\n");
+                }
+                finally
+                {
+                    await InvokeAsync(() => { wsVm.IsExecuting = false; StateHasChanged(); });
+                }
+            });
+        }
+    }
+
+    private void StopWorkspaceExecution()
+    {
+        _agentCts?.Cancel();
+        if (_activeSession != null) _activeSession.IsExecuting = false;
+        StateHasChanged();
+    }
+
+    private async Task SyncWorkspaceFilesAsync()
+    {
+        if (_activeSession is WorkspaceSessionViewModel wsVm && !wsVm.IsPreparationPhase && _currentContext != null)
+        {
+            bool stateChanged = false;
+
+            if (File.Exists(_currentContext.StatusFilePath))
+            {
+                try
+                {
+                    var status = await File.ReadAllTextAsync(_currentContext.StatusFilePath);
+                    if (wsVm.WorkspaceStatusText != status) { wsVm.WorkspaceStatusText = status; stateChanged = true; }
+                }
+                catch { }
+            }
+
+            if (File.Exists(_currentContext.MainPlanFilePath))
+            {
+                try
+                {
+                    var plan = await File.ReadAllTextAsync(_currentContext.MainPlanFilePath);
+                    if (wsVm.PlanText != plan) { wsVm.PlanText = plan; stateChanged = true; }
+                }
+                catch { }
+            }
+
+            if (Directory.Exists(_currentContext.MemoDirectory))
+            {
+                try
+                {
+                    var files = new DirectoryInfo(_currentContext.MemoDirectory).GetFiles("*.md").OrderBy(f => f.CreationTime).ToList();
+                    foreach (var file in files)
+                    {
+                        var content = await File.ReadAllTextAsync(file.FullName);
+                        bool newlyRendered = false;
+
+                        if (!_renderedMemos.Contains(file.FullName))
+                        {
+                            newlyRendered = ParseAndAddMemoToChat(wsVm, file.FullName, content);
+                            _renderedMemos.Add(file.FullName);
+                        }
+                        else if (content.Contains("## Agent Reply"))
+                        {
+                            newlyRendered = ParseAndAddMemoToChat(wsVm, file.FullName, content);
+                        }
+
+                        if (newlyRendered) stateChanged = true;
+                    }
+                }
+                catch { }
+            }
+
+            if (stateChanged) await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private bool ParseAndAddMemoToChat(WorkspaceSessionViewModel wsVm, string filePath, string content)
+    {
+        bool added = false;
+        var parts = content.Split(["## Agent Reply"], StringSplitOptions.None);
+
+        string userMemoText = parts[0].Replace("# Visual GUI Memo Interruption", "").Trim();
+        if (userMemoText.Contains("*Submitted at:")) userMemoText = string.Join("\n", userMemoText.Split('\n').Skip(1)).Trim();
+
+        if (!wsVm.Messages.Any(m => m.Content == userMemoText && m.IsMemo))
+        {
+            wsVm.Messages.Add(new SessionMessage { Sender = "User (Memo)", Content = userMemoText, IsMemo = true, Timestamp = File.GetCreationTime(filePath) });
+            added = true;
+        }
+
+        if (parts.Length > 1)
+        {
+            string agentReplyText = parts[1].Trim();
+            if (agentReplyText.Contains("*Responded at:")) agentReplyText = string.Join("\n", agentReplyText.Split('\n').Skip(1)).Trim();
+
+            if (!wsVm.Messages.Any(m => m.Content == agentReplyText && m.Sender.Contains("Conductor")))
+            {
+                wsVm.Messages.Add(new SessionMessage { Sender = "Conductor (Reply)", Content = agentReplyText, IsMemo = true, Timestamp = File.GetLastWriteTime(filePath) });
+                added = true;
+
+                // Auto-save physical state whenever Agent replies
+                _ = _sessionManager.SaveSessionAsync(wsVm.Model);
+            }
+        }
+        return added;
+    }
+
+    public void Dispose()
+    {
+        _syncTimer?.Dispose();
+        _agentCts?.Dispose();
+    }
+}

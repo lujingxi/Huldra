@@ -1,0 +1,37 @@
+﻿@using Huldra.Shared.ViewModels
+
+<div class="plan-pane">
+    <div class="pane-title">Live Development Plan</div>
+    <div class="plan-list">
+        @if (string.IsNullOrEmpty(ViewModel.PlanText))
+        {
+            <span style="color: var(--text-muted); font-size: 13px;">Awaiting plan...</span>
+        }
+        else
+        {
+            @foreach (var line in ViewModel.PlanText.Split('\n'))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("- [ ]"))
+                {
+                    <div class="task-item pending"><div class="task-checkbox"></div><span>@trimmed.Substring(5)</span></div>
+                }
+                else if (trimmed.StartsWith("- [x]") || trimmed.StartsWith("- [X]"))
+                {
+                    <div class="task-item completed"><div class="task-checkbox checked">✓</div><span style="text-decoration: line-through;">@trimmed.Substring(5)</span></div>
+                }
+                else if (trimmed.StartsWith("#"))
+                {
+                    <div class="task-header">@trimmed.Replace("#", "")</div>
+                }
+            }
+        }
+    </div>
+
+    <div class="pane-title" style="margin-top: 20px;">Console Output</div>
+    <div class="console-view"><pre>@ViewModel.LogConsole</pre></div>
+</div>
+
+@code {
+    [Parameter] public WorkspaceSessionViewModel ViewModel { get; set; } = default!;
+}

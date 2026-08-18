@@ -1,0 +1,55 @@
+.banner-area {
+    display: flex;
+    align-items: center;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border-color);
+    background-color: var(--bg-card);
+    gap: 12px;
+    /* Ensure the banner stays at the top and never shrinks */
+    flex-shrink: 0;
+    min-height: 50px;
+}
+
+.status-indicator {
+    width: 16px;
+    height: 16px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border-color);
+    border-top: 2px solid var(--btn-default-bg);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.banner-title {
+    flex-grow: 1;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-main);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.banner-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}

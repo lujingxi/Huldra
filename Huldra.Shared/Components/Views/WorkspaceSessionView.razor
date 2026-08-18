@@ -1,0 +1,24 @@
+﻿@using Huldra.Shared.ViewModels
+
+<div class="session-wrapper">
+    <!-- Play/Stop actions are passed into Banner -->
+    <BannerView ViewModel="ViewModel"
+                OnPlayClicked="OnLaunchWorkspace"
+                OnStopClicked="OnStopWorkspace" />
+
+    <div class="ide-split">
+        <div class="ide-pane chat-pane">
+            <ChatView Messages="ViewModel.Messages" OnSendMessage="OnSendMessage" />
+        </div>
+        <div class="ide-pane">
+            <WorkspaceProgressView ViewModel="ViewModel" />
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public WorkspaceSessionViewModel ViewModel { get; set; } = default!;
+    [Parameter] public EventCallback<string> OnSendMessage { get; set; }
+    [Parameter] public EventCallback OnLaunchWorkspace { get; set; }
+    [Parameter] public EventCallback OnStopWorkspace { get; set; }
+}

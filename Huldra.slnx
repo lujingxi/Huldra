@@ -1,0 +1,12 @@
+<Solution>
+  <Project Path="Huldra.Agent/Huldra.Agent.csproj" />
+  <Project Path="Huldra.Cli/Huldra.Cli.csproj" />
+  <Project Path="Huldra.Desktop/Huldra.Desktop.csproj" Id="3e638da3-b2be-44bd-9f49-970a5d5af5b0">
+    <Deploy Solution="Debug|*" />
+  </Project>
+  <Project Path="Huldra.Engine.Tests/Huldra.Engine.Tests.csproj" Id="d0cf6894-30fc-4b63-96f7-958578e28c0d" />
+  <Project Path="Huldra.Engine/Huldra.Engine.csproj" />
+  <Project Path="Huldra.Logging/Huldra.Logging.csproj" Id="ab674ff9-8e93-4f46-9e2b-4324fa19f29f" />
+  <Project Path="Huldra.Server/Huldra.Server.csproj" Id="554a4a4b-245f-46e6-9a2c-5bd008c76cd5" />
+  <Project Path="Huldra.Shared/Huldra.Shared.csproj" Id="c4a129f2-e423-400f-b3d5-e4f081653f70" />
+</Solution>

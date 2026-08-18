@@ -1,0 +1,56 @@
+.huldra-layout {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    height: 100vh;
+    max-height: 100vh;
+    background-color: var(--bg-app);
+    color: var(--text-main);
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.main-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+.main-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 15px 25px;
+    border-bottom: 1px solid var(--border-color);
+    background-color: var(--bg-card);
+}
+
+.header-title {
+    font-size: 17px;
+    font-weight: bold;
+}
+
+.header-badge, .phase-badge {
+    font-size: 11px;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-weight: bold;
+    background-color: var(--border-color);
+    color: var(--text-muted);
+}
+
+    .phase-badge.executing {
+        background-color: #8b0000;
+        color: white;
+    }
+
+    .phase-badge.preparing {
+        background-color: #008080;
+        color: white;
+    }
+
+.session-workspace-area {
+    flex-grow: 1;
+    display: flex;
+    overflow: hidden;
+}

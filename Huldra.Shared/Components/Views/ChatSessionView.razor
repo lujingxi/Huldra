@@ -1,0 +1,11 @@
+﻿@using Huldra.Shared.ViewModels
+
+<div class="session-wrapper">
+    <BannerView ViewModel="ViewModel" />
+    <ChatView Messages="ViewModel.Messages" OnSendMessage="OnSendMessage" />
+</div>
+
+@code {
+    [Parameter] public ChatSessionViewModel ViewModel { get; set; } = default!;
+    [Parameter] public EventCallback<string> OnSendMessage { get; set; }
+}

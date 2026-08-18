@@ -1,0 +1,24 @@
+.session-wrapper {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    background-color: var(--bg-app);
+}
+
+.ide-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    flex-grow: 1;
+    overflow: hidden;
+}
+
+.ide-pane {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+    .ide-pane.chat-pane {
+        border-right: 1px solid var(--border-color);
+    }

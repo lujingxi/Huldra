@@ -1,0 +1,47 @@
+﻿@using Huldra.Shared.ViewModels
+@using Huldra.Shared.Components.Icons
+
+<div class="banner-area">
+    <div class="status-indicator">
+        @if (ViewModel.IsExecuting)
+        {
+            <div class="spinner"></div>
+        }
+        else
+        {
+
+            <CheckIcon width="16" height="16" />
+        }
+    </div>
+
+    <div class="banner-title">@ViewModel.Model.Name</div>
+
+    <div class="banner-actions">
+        <!-- Settings (Transparent style) -->
+        <button class="fluent-btn btn-transparent" title="Workspace Settings">
+            <SettingsIcon width="16" height="16" />
+        </button>
+
+        @if (ViewModel is WorkspaceSessionViewModel)
+        {
+            @if (!ViewModel.IsExecuting)
+            {
+                <button class="fluent-btn btn-transparent" title="Start Workspace" @onclick="OnPlayClicked">
+                    <PlayIcon width="16" height="16" />
+                </button>
+            }
+            else
+            {
+                <button class="fluent-btn btn-transparent" title="Stop Workspace" @onclick="OnStopClicked">
+                    <StopIcon width="16" height="16" color="#D13438" />
+                </button>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public SessionViewModel ViewModel { get; set; } = default!;
+    [Parameter] public EventCallback OnPlayClicked { get; set; }
+    [Parameter] public EventCallback OnStopClicked { get; set; }
+}
