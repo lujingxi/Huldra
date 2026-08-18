@@ -1,0 +1,6 @@
+- Runtime tensor-format discovery uses reflection + caching.
+- We do not use a source generator for tensor formats.
+- Quantization interfaces IQuantizer/IQuantizedDotProduct were removed.
+- Scalar is the correctness/reference backend.
+- Vector backend is the current SIMD implementation.
+- GPU backend will be added later.
