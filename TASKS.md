@@ -1,6 +1,8 @@
 | Priority | 工作                                            |
 | -------- | --------------------------------------------- |
-| 🟥 P0    | **建立 model architecture capability boundary** |
+| 🟥 P0-1    | **建立 model architecture capability boundary**
+- [x] Establish model architecture identity boundary
+- [x] Separate architecture recognition from current model implementation |
 | 🟥 P0    | **Gemma tokenizer 問題**                        |
 | 🟥 P0    | **Gemma 2/3 architecture config 不足**          |
 | 🟥 P0    | **Context/KV cache capacity validation**      |

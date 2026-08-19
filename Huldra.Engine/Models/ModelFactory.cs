@@ -36,9 +36,7 @@ public static class ModelFactory
                 },
 
             ModelArchitecture.Gemma or
-            ModelArchitecture.Gemma2 or
-            ModelArchitecture.Gemma3 or
-            ModelArchitecture.Gemma4
+            ModelArchitecture.Gemma2
                 => new GemmaModel
                 {
                     Config = config,
