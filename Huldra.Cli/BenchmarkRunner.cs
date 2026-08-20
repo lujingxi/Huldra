@@ -63,7 +63,6 @@ internal sealed class BenchmarkRunner
             BackendRuntime.Instance.GetBackend(benchmarkCase.Backend);
 
         IModel model = benchmarkCase.Model;
-
         string prompt = model.ApplyChatTemplate(userPrompt);
 
         int[] tokenBuffer = new int[TokenBufferSize];
@@ -76,7 +75,7 @@ internal sealed class BenchmarkRunner
         if (tokenCount <= 0)
         {
             throw new InvalidOperationException(
-                $"Tokenizer produced no tokens for the benchmark prompt.");
+                "Tokenizer produced no tokens for the benchmark prompt.");
         }
 
         if (tokenCount >= ContextSize)
@@ -93,6 +92,19 @@ internal sealed class BenchmarkRunner
         {
             tokens.Add(tokenBuffer[i]);
         }
+
+        // Keep generated tokens separately from the full context.
+        //
+        // "tokens" contains:
+        //   prompt + generated tokens
+        //
+        // "generatedTokenIds" contains:
+        //   generated tokens only
+        //
+        // This lets us decode the actual model output without
+        // accidentally decoding the prompt/chat template again.
+        List<int> generatedTokenIds =
+            new(MaxGeneratedTokens);
 
         Console.WriteLine(new string('-', 72));
         Console.WriteLine(
@@ -162,6 +174,7 @@ internal sealed class BenchmarkRunner
             }
 
             tokens.Add(nextToken);
+            generatedTokenIds.Add(nextToken);
             generatedTokens++;
         }
 
@@ -175,6 +188,15 @@ internal sealed class BenchmarkRunner
                 ? generatedTokens / elapsedSeconds
                 : 0.0;
 
+        /*
+         * Decode outside the benchmark timer.
+         *
+         * Token decoding is not part of inference performance, so it should
+         * not affect the elapsed time or throughput measurement.
+         */
+        string output = model.Tokenizer.Decode(
+            CollectionsMarshal.AsSpan(generatedTokenIds));
+
         Console.WriteLine(
             $"Generated:     {generatedTokens} tokens");
 
@@ -184,13 +206,25 @@ internal sealed class BenchmarkRunner
         Console.WriteLine(
             $"Throughput:    {tokensPerSecond:F2} tok/s");
 
+        Console.WriteLine("Output:");
+
+        if (string.IsNullOrEmpty(output))
+        {
+            Console.WriteLine("(empty)");
+        }
+        else
+        {
+            Console.WriteLine(output);
+        }
+
         return new BenchmarkResult(
             benchmarkCase.Backend,
             benchmarkCase.Format,
             tokenCount,
             generatedTokens,
             stopwatch.Elapsed,
-            tokensPerSecond);
+            tokensPerSecond,
+            output);
     }
 
     public static void PrintSummary(
@@ -237,4 +271,5 @@ internal sealed record BenchmarkResult(
     int PromptTokens,
     int GeneratedTokens,
     TimeSpan Elapsed,
-    double TokensPerSecond);
+    double TokensPerSecond,
+    string Output);
