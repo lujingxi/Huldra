@@ -1,5 +1,6 @@
-﻿using System.Text;
+﻿using Huldra.Engine.Backends;
 using Huldra.Engine.Models;
+using System.Text;
 
 namespace Huldra.Cli;
 
@@ -42,13 +43,22 @@ internal static class Program
         Console.WriteLine("Q4_0 model loaded.");
         Console.WriteLine();
 
-        var runner = new BenchmarkRunner(
+        BackendParallelInstrumentation.Enabled = true;
+
+        try
+        {
+            var runner = new BenchmarkRunner(
             f16Model,
             q4Model);
 
-        IReadOnlyList<BenchmarkResult> results = runner.Run(input);
+            IReadOnlyList<BenchmarkResult> results = runner.Run(input);
 
-        BenchmarkRunner.PrintSummary(results);
+            BenchmarkRunner.PrintSummary(results);
+        }
+        finally
+        {
+            BackendParallelInstrumentation.Enabled = false;
+        }
 
         Console.WriteLine();
         Console.WriteLine("Benchmark finished.");

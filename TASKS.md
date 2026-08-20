@@ -11,6 +11,16 @@ Priority levels:
 
 ---
 
+### P1 — Performance Investigation
+
+- [ ] Add MatMul parallelism instrumentation
+  - Measure requested worker count
+  - Measure maximum concurrent workers
+  - Measure distinct managed threads
+  - Measure distinct logical processors observed
+- [ ] Run Scalar / Vector × F16 / Q4_0 benchmark and record results
+- [ ] Use instrumentation results to determine the next parallelism optimization
+
 # 🟥 P0 — CPU Performance Baseline & Optimization
 
 The current CPU inference path is functionally working, but several

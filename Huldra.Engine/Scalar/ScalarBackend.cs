@@ -57,30 +57,42 @@ public sealed class ScalarBackend : IBackend
         }
 
         // result[seq, o] = sum_i ( a[i, o] * b[seq, i] )
-        Parallel.For(0, SeqLen, seq =>
-        {
-            ReadOnlySpan<float> aSpan = MemoryMarshal.Cast<byte, float>(aMemory.Span);
-            ReadOnlySpan<float> bSpan = MemoryMarshal.Cast<byte, float>(bMemory.Span);
-            Span<float> resultSpan = MemoryMarshal.Cast<byte, float>(resultMemory.Span);
-
-            // Row offsets for Row-major matrices
-            int bRowOffset = seq * In;
-            int resRowOffset = seq * Out;
-
-            for (int o = 0; o < Out; o++)
+        BackendParallel.For(
+            SeqLen,
+            1,
+            (start, end) =>
             {
-                float sum = 0f;
+                ReadOnlySpan<float> aSpan =
+                    MemoryMarshal.Cast<byte, float>(aMemory.Span);
 
-                // a is Column-major, so a[i, o] is at index (o * In + i)
-                int aColOffset = o * In;
+                ReadOnlySpan<float> bSpan =
+                    MemoryMarshal.Cast<byte, float>(bMemory.Span);
 
-                for (int i = 0; i < In; i++)
+                Span<float> resultSpan =
+                    MemoryMarshal.Cast<byte, float>(resultMemory.Span);
+
+                for (int seq = start; seq < end; seq++)
                 {
-                    sum += aSpan[aColOffset + i] * bSpan[bRowOffset + i];
+                    int bRowOffset = seq * In;
+                    int resRowOffset = seq * Out;
+
+                    for (int o = 0; o < Out; o++)
+                    {
+                        float sum = 0f;
+
+                        int aColOffset = o * In;
+
+                        for (int i = 0; i < In; i++)
+                        {
+                            sum +=
+                                aSpan[aColOffset + i] *
+                                bSpan[bRowOffset + i];
+                        }
+
+                        resultSpan[resRowOffset + o] = sum;
+                    }
                 }
-                resultSpan[resRowOffset + o] = sum;
-            }
-        });
+            });
 
         if (aBuffer is not null) ArrayPool<byte>.Shared.Return(aBuffer);
         if (bBuffer is not null) ArrayPool<byte>.Shared.Return(bBuffer);

@@ -143,42 +143,45 @@ internal sealed class BenchmarkRunner
 
         Stopwatch stopwatch = Stopwatch.StartNew();
 
-        for (int i = 0; i < MaxGeneratedTokens; i++)
+        using (BackendParallelInstrumentation.Begin())
         {
-            ReadOnlySpan<int> inputTokens;
-
-            if (i == 0)
+            for (int i = 0; i < MaxGeneratedTokens; i++)
             {
-                inputTokens =
-                    CollectionsMarshal.AsSpan(tokens)
-                        .Slice(0, tokenCount);
+                ReadOnlySpan<int> inputTokens;
+
+                if (i == 0)
+                {
+                    inputTokens =
+                        CollectionsMarshal.AsSpan(tokens)
+                            .Slice(0, tokenCount);
+                }
+                else
+                {
+                    inputTokens =
+                        CollectionsMarshal.AsSpan(tokens)
+                            .Slice(tokens.Count - 1, 1);
+                }
+
+                context.Evaluate(inputTokens);
+
+                ReadOnlySpan<float> logits =
+                    context.GetLogits();
+
+                int nextToken =
+                    sampler.Sample(logits);
+
+                if (model.Tokenizer.EndOfSequenceTokenIds.Contains(nextToken))
+                    break;
+
+                tokens.Add(nextToken);
+                generatedTokens++;
             }
-            else
-            {
-                inputTokens =
-                    CollectionsMarshal.AsSpan(tokens)
-                        .Slice(tokens.Count - 1, 1);
-            }
-
-            context.Evaluate(inputTokens);
-
-            ReadOnlySpan<float> logits =
-                context.GetLogits();
-
-            int nextToken =
-                sampler.Sample(logits);
-
-            if (model.Tokenizer.EndOfSequenceTokenIds.Contains(nextToken))
-            {
-                break;
-            }
-
-            tokens.Add(nextToken);
-            generatedTokenIds.Add(nextToken);
-            generatedTokens++;
         }
 
         stopwatch.Stop();
+
+        BackendParallelStats? parallelStats =
+            BackendParallelInstrumentation.LastStats;
 
         double elapsedSeconds =
             stopwatch.Elapsed.TotalSeconds;
@@ -188,23 +191,27 @@ internal sealed class BenchmarkRunner
                 ? generatedTokens / elapsedSeconds
                 : 0.0;
 
-        /*
-         * Decode outside the benchmark timer.
-         *
-         * Token decoding is not part of inference performance, so it should
-         * not affect the elapsed time or throughput measurement.
-         */
+        Console.WriteLine(
+            $"Generated: {generatedTokens} tokens");
+
+        Console.WriteLine(
+            $"Elapsed: {elapsedSeconds:F3} s");
+
+        Console.WriteLine(
+            $"Throughput: {tokensPerSecond:F2} tok/s");
+
+        if (parallelStats is not null)
+        {
+            Console.WriteLine(
+                $"MatMul parallelism: " +
+                $"workers={parallelStats.WorkerCount}, " +
+                $"max-concurrent={parallelStats.MaxConcurrentWorkers}, " +
+                $"threads={parallelStats.DistinctManagedThreads}, " +
+                $"logical-processors={parallelStats.DistinctLogicalProcessors}");
+        }
+
         string output = model.Tokenizer.Decode(
             CollectionsMarshal.AsSpan(generatedTokenIds));
-
-        Console.WriteLine(
-            $"Generated:     {generatedTokens} tokens");
-
-        Console.WriteLine(
-            $"Elapsed:       {elapsedSeconds:F3} s");
-
-        Console.WriteLine(
-            $"Throughput:    {tokensPerSecond:F2} tok/s");
 
         Console.WriteLine("Output:");
 
