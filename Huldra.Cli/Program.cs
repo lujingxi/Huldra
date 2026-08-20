@@ -1,76 +1,56 @@
-﻿using Huldra.Engine.Backends;
+﻿using System.Text;
 using Huldra.Engine.Models;
-using Huldra.Engine.Sampling;
-using Huldra.Engine.Scalar;
-using Huldra.Engine.Vector;
-using System.Runtime.InteropServices;
-using System.Text;
 
-// Configure the console to handle UTF-8 data
-Console.OutputEncoding = Encoding.UTF8;
-Console.InputEncoding = Encoding.UTF8;
+namespace Huldra.Cli;
 
-//Model Path
-string[] paths =
-[
-    @"C:\Users\lujin\.lmstudio\models\Qwen\Qwen2.5-0.5B-Instruct-GGUF\qwen2.5-0.5b-instruct-fp16.gguf",
-    @"C:\Users\lujin\.lmstudio\models\Qwen\Qwen2.5-0.5B-Instruct-GGUF\qwen2.5-0.5b-instruct-q4_0.gguf",
-    @"C:\Users\lujin\.lmstudio\models\lmstudio-community\gemma-4-E2B-it-QAT-GGUF\gemma-4-E2B-it-QAT-Q4_0.gguf"
-];
-string modelPath = paths[1];
-
-// 1. Initialize
-IBackend backend = BackendRuntime.Instance.GetBackend("Vector");
-
-// 2. Load Model
-Console.WriteLine("Loading model...");
-IModel model = ModelFactory.Load(modelPath);
-IContext context = model.CreateContext(512, backend); // Context size 512
-
-// 3. Tokenize prompt
-Console.Write("User: ");
-string input = Console.ReadLine() ?? "Hello";
-string prompt = model.ApplyChatTemplate(input);
-
-int[] tokenArr = new int[4096];
-int tokenCount = model.Tokenizer.Encode(prompt, tokenArr);
-List<int> tokens = tokenArr[..tokenCount].ToList();
-
-Console.Write("Tokens: ");
-Console.WriteLine(string.Join(", ", tokens));
-
-// 4.Initialize Sampler
-var sampler = new Sampler(new SamplerConfig
+internal static class Program
 {
-    Temperature = 0.7f, // Try 0.1 to 1.0
-    TopK = 40,
-    TopP = 0.9f
-});
+    private const string F16ModelPath =
+        @"C:\Users\lujin\.lmstudio\models\Qwen\Qwen2.5-0.5B-Instruct-GGUF\qwen2.5-0.5b-instruct-fp16.gguf";
 
-Console.Write("AI: ");
+    private const string Q4_0ModelPath =
+        @"C:\Users\lujin\.lmstudio\models\Qwen\Qwen2.5-0.5B-Instruct-GGUF\qwen2.5-0.5b-instruct-q4_0.gguf";
 
-// 5. Generation Loop
-int maxTokens = 100;
-for (int i = 0; i < maxTokens; i++)
-{
-    ReadOnlySpan<int> inputTokens = (i == 0)
-        ? CollectionsMarshal.AsSpan(tokens)
-        : CollectionsMarshal.AsSpan(tokens).Slice(tokens.Count - 1, 1);
+    public static void Main()
+    {
+        Console.OutputEncoding = Encoding.UTF8;
+        Console.InputEncoding = Encoding.UTF8;
 
-    context.Evaluate(inputTokens);
-    ReadOnlySpan<float> logits = context.GetLogits();
+        Console.WriteLine("Huldra CLI");
+        Console.WriteLine();
 
-    // Use Sampler instead of Argmax
-    int nextToken = sampler.Sample(logits);
+        Console.Write("User: ");
+        string input = Console.ReadLine() ?? "Hello";
 
-    if (model.Tokenizer.EndOfSequenceTokenIds.Contains(nextToken))
-        break;
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            input = "Hello";
+        }
 
-    tokens.Add(nextToken);
+        Console.WriteLine();
+        Console.WriteLine("Loading F16 model...");
 
-    string decoded = model.Tokenizer.Decode(new[] { nextToken });
-    Console.Write(decoded);
-    Console.Out.Flush();
+        IModel f16Model = ModelFactory.Load(F16ModelPath);
+
+        Console.WriteLine("F16 model loaded.");
+        Console.WriteLine();
+
+        Console.WriteLine("Loading Q4_0 model...");
+
+        IModel q4Model = ModelFactory.Load(Q4_0ModelPath);
+
+        Console.WriteLine("Q4_0 model loaded.");
+        Console.WriteLine();
+
+        var runner = new BenchmarkRunner(
+            f16Model,
+            q4Model);
+
+        IReadOnlyList<BenchmarkResult> results = runner.Run(input);
+
+        BenchmarkRunner.PrintSummary(results);
+
+        Console.WriteLine();
+        Console.WriteLine("Benchmark finished.");
+    }
 }
-
-Console.WriteLine("\nGeneration finished.");
