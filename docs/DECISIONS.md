@@ -4,3 +4,5 @@
 - Scalar is the correctness/reference backend.
 - Vector backend is the current SIMD implementation.
 - GPU backend will be added later.
+- Profile ≠ TensorType
+- Q4_1 / Q5_1 = compatibility，not priority
