@@ -11,225 +11,646 @@ Priority levels:
 
 ---
 
-# 🟥 P0 — CPU Performance Baseline & Optimization
+# 🟥 P0 — Qwen2.5-0.5B Golden Reference & Quantization
 
-The current CPU inference path is functionally working, but several backend/model combinations show poor CPU utilization and long test times.
+The current development strategy is centered on Qwen2.5-0.5B as the
+Golden Reference Model for the CPU inference engine.
 
-The goal of this phase is not production-grade optimization.
+Qwen2.5-0.5B is intentionally used because:
 
-The goal is to establish a reliable benchmark, identify obvious bottlenecks, and apply low-risk optimizations before continuing with broader model support.
+- It is small enough to keep development and regression testing practical.
+- It is a widely used model architecture.
+- Multiple GGUF quantization variants are readily available.
+- Its small size allows the same model to be tested repeatedly across
+  multiple tensor formats and backends.
 
-## P0.1 — CLI Benchmark Harness
+The goal of this phase is to establish a correct, well-tested and
+reasonably performant CPU inference baseline before expanding to other
+model architectures.
 
-- [x] Accept one user prompt.
-- [x] Run the same prompt against all four combinations:
-  - Scalar + F16
-  - Scalar + Q4_0
-  - Vector + F16
-  - Vector + Q4_0
-- [x] Create a fresh inference context for every benchmark run.
-- [x] Keep generation parameters identical between runs.
-- [x] Use deterministic greedy sampling.
-- [x] Report elapsed time.
-- [x] Report generated token count.
-- [x] Report tokens/second.
-- [x] Present the four results in a clear summary.
-- [ ] Display the generated text for every benchmark case.
-- [ ] Verify that all four configurations produce identical deterministic output.
+## P0.1 — Quantization Coverage Audit
 
-## P0.2 — Backend Parallelism Audit
+Audit the current Huldra implementation against the GGML/GGUF tensor
+types relevant to CPU inference.
 
-Investigate why several CPU workloads do not fully utilize available logical cores.
+The audit must distinguish between:
 
-### P0.2.1 — Instrumentation
+1. Base GGML tensor/quantization types.
+2. Mixed quantization model profiles built from those base types.
 
-- [x] Add temporary MatMul parallelism instrumentation.
-- [x] Report configured worker count.
-- [x] Report maximum observed MatMul concurrency.
-- [x] Compare Scalar and Vector MatMul behavior.
-- [x] Establish a baseline before changing backend implementation.
+For example:
 
-Current observation:
+- `Q3_K` is a base GGML quantization type.
+- `Q3_K_S`, `Q3_K_M` and `Q3_K_L` are mixed quantization profiles
+  that select different base quantization types for different tensors.
+- `Q4_K` is a base GGML quantization type.
+- `Q4_K_S` and `Q4_K_M` are mixed quantization profiles.
+- `Q5_K` is a base GGML quantization type.
+- `Q5_K_S` and `Q5_K_M` are mixed quantization profiles.
 
-- Scalar MatMul uses a single worker.
-- Vector MatMul uses all available workers.
-- Vector Q4_0 currently provides the strongest CPU utilization and performance.
-- Scalar F16 and Scalar Q4_0 are currently dominated by single-worker execution.
+The coverage audit must therefore not treat every `*_K_S`, `*_K_M` or
+`*_K_L` profile as a completely separate low-level quantization
+implementation.
 
-### P0.2.2 — Scalar MatMul
+### P0.1.1 — Huldra Type Inventory
 
-- [ ] Review Scalar MatMul partitioning.
-- [ ] Determine why Scalar MatMul is limited to a single worker.
-- [ ] Determine whether the limitation is intentional or accidental.
-- [ ] Test a low-risk parallel partitioning strategy.
-- [ ] Verify numerical results against the existing Scalar implementation.
-- [ ] Measure performance before and after the change.
+Audit the current source tree and record:
 
-### P0.2.3 — Vector MatMul
+- `TensorType`
+- GGUF tensor type parsing
+- tensor storage implementations
+- `TensorFormatRegistry`
+- `TensorFormatDescriptor`
+- `QuantizationRuntime`
+- all dequantization implementations
+- Scalar backend support
+- Vector backend support
+- existing quantization tests
 
-- [x] Confirm that Vector MatMul reaches multiple workers.
-- [ ] Investigate why Vector F16 remains substantially slower than Vector Q4_0 despite using multiple workers.
-- [ ] Determine whether the F16 fallback/dequantization path is responsible.
-- [ ] Do not change the Vector kernel until the cause is identified.
+Update `docs/QUANTIZATION_COVERAGE.md` with verified information.
 
-### P0.2.4 — Other Backend Operations
+Do not infer support from enum values alone.
 
-After MatMul:
+A format is considered implemented only when the complete required
+runtime path is verified.
 
-- [ ] Review RMSNorm parallelism.
-- [ ] Review Attention parallelism.
-- [ ] Review RoPE parallelism.
-- [ ] Identify workloads where scheduling overhead exceeds useful computation.
-- [ ] Verify that small workloads do not create unnecessary parallel overhead.
+### P0.1.2 — GGML Base Quantization Inventory
 
-## P0.3 — Low-Risk CPU Optimization
+Track the base GGML types that are relevant to Huldra's intended CPU
+runtime.
 
-Apply only optimizations justified by benchmark evidence.
+Initial traditional quantization group:
 
-- [ ] Optimize parallel partitioning / work granularity where appropriate.
-- [ ] Avoid unnecessary thread creation.
-- [ ] Avoid unnecessary repeated span conversion inside hot loops where practical.
-- [ ] Prefer safe managed-memory solutions.
-- [ ] Avoid `unsafe` unless later measurements demonstrate a meaningful benefit.
-- [ ] Avoid changing numerical semantics.
-- [ ] Avoid architecture-specific SIMD specialization at this stage.
-- [ ] Avoid premature kernel rewrites.
+- `Q4_0`
+- `Q4_1`
+- `Q5_0`
+- `Q5_1`
+- `Q8_0`
 
-## P0.4 — Performance Regression Validation
+K-quant group:
 
-Every performance change must be validated against the established benchmark.
+- `Q2_K`
+- `Q3_K`
+- `Q4_K`
+- `Q5_K`
+- `Q6_K`
+- `Q8_K`
 
-- [ ] All existing tests pass.
-- [ ] Scalar backend remains the correctness/reference implementation.
-- [ ] Vector backend remains numerically consistent with Scalar within appropriate tolerance.
-- [ ] Benchmark results are recorded before and after optimization.
-- [ ] Generated output remains deterministic under greedy sampling.
-- [ ] No optimization is accepted without measurable improvement or clear architectural justification.
-- [ ] Temporary instrumentation is removed or converted into a deliberate diagnostics facility once the audit is complete.
+Other quantization families must also be recorded in the audit,
+including:
 
----
+- IQ family
+- TQ family
+- newer GGML quantization types introduced by upstream GGML
 
-# 🟥 P0 — Gemma 4 Support
+The audit must distinguish:
 
-Gemma 4 is the first Gemma architecture currently targeted by Huldra.
+- supported
+- partially supported
+- unsupported
+- obsolete/removed GGUF types
+- types that are not currently relevant to Huldra's target runtime
 
-Gemma 1, Gemma 2 and Gemma 3 are not current targets and should not drive the architecture of the implementation.
+Do not commit to implementing every upstream type merely because it
+exists.
 
-## P0.5 — Gemma 4 Architecture
+The upstream GGML type list is evolving and must be re-audited before
+the project claims complete coverage.
 
-- [ ] Verify Gemma 4 GGUF metadata requirements.
-- [ ] Define the Gemma 4 architecture capability boundary.
-- [ ] Update model architecture detection.
-- [ ] Add Gemma 4-specific model configuration where required.
-- [ ] Remove assumptions that Gemma support means Gemma 1/2/3 support.
+### P0.1.3 — Floating-Point / Non-Quantized Types
 
-## P0.6 — Gemma 4 Tokenizer
+Audit support for:
 
-- [ ] Verify Gemma 4 tokenizer metadata.
-- [ ] Determine whether `LlamaTokenizer` can correctly represent the Gemma 4 tokenizer.
-- [ ] Introduce a dedicated tokenizer abstraction/implementation if required.
-- [ ] Validate special tokens and EOS handling.
-- [ ] Add tokenizer regression tests.
+- `F32`
+- `F16`
+- `BF16`
 
-## P0.7 — Gemma 4 Inference Semantics
+Determine whether each type is supported for:
 
-- [ ] Verify embedding scaling.
-- [ ] Verify normalization semantics.
-- [ ] Verify attention semantics.
-- [ ] Verify RoPE configuration.
-- [ ] Verify MLP activation and tensor layout.
-- [ ] Verify output projection.
-- [ ] Validate Gemma 4 inference against known-good output.
+- GGUF loading
+- tensor storage
+- dequantization/conversion where applicable
+- MatMul
+- model inference
 
----
+`F32` and `F16` are part of the Golden Reference baseline.
 
-# 🟨 P1 — Correctness & Architecture Hardening
+`BF16` should be tracked even if implementation is deferred.
 
-## P1.1 — Tensor / Context Validation
+### P0.1.4 — Mixed Quantization Profiles
 
-- [ ] Validate context size against KV-cache capacity.
-- [ ] Validate token IDs before embedding lookup.
-- [ ] Validate sequence length against context capacity.
-- [ ] Improve error messages for invalid model/context state.
+Track commonly available mixed quantization profiles separately from
+base quantization types.
 
-## P1.2 — Backend Numerical Regression
+Examples:
 
-- [ ] Add Scalar ↔ Vector numerical regression tests.
-- [ ] Cover F32/F16 paths.
-- [ ] Cover Q4_0 paths.
-- [ ] Establish appropriate numerical tolerances.
-- [ ] Verify deterministic generation across supported CPU backends.
+- `Q2_K`
+- `Q3_K_S`
+- `Q3_K_M`
+- `Q3_K_L`
+- `Q4_0`
+- `Q4_K_S`
+- `Q4_K_M`
+- `Q5_0`
+- `Q5_K_S`
+- `Q5_K_M`
+- `Q6_K`
+- `Q8_0`
 
-## P1.3 — Model / Backend Separation
+For each mixed profile, document which underlying GGML tensor types are
+used by the model exporter.
 
-- [ ] Remove remaining model-family assumptions from generic backend code.
-- [ ] Remove remaining tensor-format hard-coding from model execution paths.
-- [ ] Keep architecture-specific behavior inside model/context implementations where appropriate.
+The profile itself must not result in unnecessary duplicated tensor
+format implementations.
 
-## P1.4 — Code Cleanup
+### P0.1.5 — Qwen2.5-0.5B Test Matrix
 
-- [ ] Remove `_hiddenStates` dead state if still unused.
-- [ ] Remove obsolete compatibility code.
-- [ ] Review temporary allocations in inference paths.
-- [ ] Review validation duplication.
-- [ ] Review benchmark-only code and diagnostics boundaries.
+Use Qwen2.5-0.5B-Instruct GGUF as the primary real-model validation
+matrix.
 
----
+The initial target matrix should include, where publicly available
+and practical:
 
-# 🟦 P2 — CPU Performance
+- F16
+- Q2_K
+- Q3_K_S
+- Q3_K_M
+- Q3_K_L
+- Q4_0
+- Q4_K_S
+- Q4_K_M
+- Q5_0
+- Q5_K_S
+- Q5_K_M
+- Q6_K
+- Q8_0
 
-These optimizations should be driven by benchmark evidence rather than implemented speculatively.
+The test matrix must identify the underlying base quantization types
+rather than treating mixed profiles as independent low-level formats.
 
-## P2.1 — RoPE
+Availability of a model file must not be treated as proof of runtime
+support.
 
-- [ ] Precompute reusable RoPE values.
-- [ ] Avoid repeated `MathF.Pow`.
-- [ ] Avoid repeated `MathF.Sin` / `MathF.Cos` where practical.
-- [ ] Benchmark before and after.
+### P0.1.6 — Coverage Audit Completion Criteria
 
-## P2.2 — Attention
+The audit is complete when:
 
-- [ ] Profile attention separately from MatMul.
-- [ ] Reduce temporary allocations.
-- [ ] Review KV-cache access patterns.
-- [ ] Optimize score calculation.
-- [ ] Optimize softmax.
-- [ ] Optimize value accumulation.
-- [ ] Benchmark each change independently.
+- `docs/QUANTIZATION_COVERAGE.md` reflects the actual source code.
+- Every currently declared TensorType has a documented status.
+- Every supported GGUF tensor type has a verified loading path.
+- Every supported quantized type has a verified storage/format
+  descriptor.
+- Every supported quantized type has a verified dequantization path.
+- Scalar MatMul support is explicitly documented.
+- Vector direct-kernel support is explicitly documented.
+- Unsupported types fail clearly rather than silently falling back to
+  incorrect behavior.
+- Mixed quantization profiles are documented separately from base
+  quantization types.
 
-## P2.3 — SIMD Specialization
-
-- [ ] Establish SIMD instruction-set detection strategy.
-- [ ] Evaluate SSE2 baseline.
-- [ ] Evaluate AVX2 backend.
-- [ ] Add instruction-set-specific kernels only when justified.
-- [ ] Keep a portable fallback.
-- [ ] Avoid `unsafe` unless benchmarks demonstrate a meaningful benefit.
-
----
-
-# 🟦 P2 — Memory & Allocation Optimization
-
-- [ ] Audit per-token temporary allocations.
-- [ ] Reduce repeated `new Tensor` allocations where safe.
-- [ ] Expand appropriate `ArrayPool<T>` usage.
-- [ ] Review KV-cache memory layout.
-- [ ] Investigate zero-copy tensor views where useful.
-- [ ] Benchmark allocation reduction separately from compute optimization.
+No new quantization implementation should begin until this audit is
+complete.
 
 ---
 
-# 🟦 P2 — GPU Backend
+# 🟥 P0.2 — Golden Reference Correctness Infrastructure
 
-The initial target remains Windows x64 CPU.
+Establish Qwen2.5-0.5B F16 as the primary numerical reference.
 
-GPU acceleration is a later architectural phase.
+The purpose is to allow new quantization implementations to be validated
+without relying only on final generated text.
 
-- [ ] Define GPU backend abstraction requirements.
-- [ ] Evaluate DirectX 12 / DirectML / Windows ML options.
-- [ ] Determine tensor upload/download strategy.
-- [ ] Determine quantized GPU kernel strategy.
-- [ ] Implement GPU backend only after CPU architecture is stable.
+## P0.2.1 — Functional Reference
+
+For every supported Qwen2.5-0.5B format:
+
+- load the GGUF model
+- create a fresh inference context
+- tokenize the same prompt
+- evaluate the same token sequence
+- obtain logits
+- perform deterministic greedy generation
+
+Verify:
+
+- no crash
+- no invalid token IDs
+- no NaN/Infinity logits
+- deterministic output
+- correct EOS handling
+
+## P0.2.2 — Numerical Reference
+
+Use F16 as the primary numerical reference.
+
+For supported quantized formats, compare relevant logits against F16.
+
+Record appropriate metrics such as:
+
+- maximum absolute error
+- mean absolute error
+- relative error where meaningful
+- top-K agreement
+
+Do not require quantized models to produce bit-identical logits.
+
+Quantization error is expected.
+
+The purpose of the comparison is to detect implementation errors,
+corruption, incorrect tensor layout, incorrect dequantization and other
+systematic problems.
+
+## P0.2.3 — Golden Reference Tests
+
+Add automated tests covering:
+
+- F16 baseline
+- every newly supported quantization type
+- representative tensors from each format
+- end-to-end Qwen2.5-0.5B inference
+- deterministic generation
+
+Tests should remain small enough to run regularly during development.
+
+---
+
+# 🟥 P0.3 — Scalar Backend Production Baseline
+
+Scalar remains the correctness/reference backend.
+
+However, Scalar must not remain effectively single-threaded.
+
+The objective is to make Scalar a practical CPU baseline while keeping
+its implementation simple and portable.
+
+## P0.3.1 — Scalar MatMul Multithreading
+
+Investigate the current Scalar MatMul partitioning.
+
+Goals:
+
+- utilize multiple CPU workers when workload size justifies it
+- preserve deterministic numerical behavior where practical
+- avoid excessive scheduling overhead
+- avoid creating unnecessary threads
+- preserve the existing Scalar implementation as the reference path
+
+Compare:
+
+- single-thread baseline
+- parallel implementation
+- numerical results
+- elapsed time
+- CPU utilization
+
+The implementation should use safe managed memory unless profiling
+demonstrates a compelling reason otherwise.
+
+`unsafe` is not the default solution.
+
+## P0.3.2 — Scalar Quantized MatMul
+
+For each supported base quantization type:
+
+- implement or verify correct Scalar MatMul
+- avoid unnecessary full-tensor dequantization when a direct kernel is
+  practical
+- validate against dequantized reference calculations
+- validate against F16 where appropriate
+- benchmark the implementation
+
+The first implementation should prioritize correctness and maintainability.
+
+Low-level optimization should follow only after correctness is
+established.
+
+## P0.3.3 — Scalar Work Scheduling
+
+Audit parallelism across:
+
+- MatMul
+- RMSNorm
+- RoPE
+- Attention
+- elementwise operations
+- embedding lookup where applicable
+
+Determine the appropriate parallel granularity for each operation.
+
+Do not parallelize every operation indiscriminately.
+
+Small workloads may be faster with sequential execution.
+
+## P0.3.4 — Scalar Performance Baseline
+
+Establish a repeatable benchmark for:
+
+- prompt processing
+- token generation
+- tokens/second
+- total elapsed time
+- memory allocation where measurable
+- CPU utilization where measurable
+
+The benchmark must remain deterministic under greedy sampling.
+
+---
+
+# 🟥 P0.4 — Quantization Implementation Roadmap
+
+After the audit and Golden Reference infrastructure are complete,
+implement missing base quantization types in measured groups.
+
+Recommended order:
+
+## P0.4.1 — Traditional Quantization
+
+Implement and validate:
+
+- Q4_1
+- Q5_0
+- Q5_1
+- Q8_0
+
+`Q4_0` is already implemented and remains the existing reference
+quantized format.
+
+## P0.4.2 — K-Quantization
+
+Implement and validate:
+
+- Q2_K
+- Q3_K
+- Q4_K
+- Q5_K
+- Q6_K
+
+These are base tensor formats.
+
+Mixed profiles such as:
+
+- Q3_K_S
+- Q3_K_M
+- Q3_K_L
+- Q4_K_S
+- Q4_K_M
+- Q5_K_S
+- Q5_K_M
+
+should become test matrices over the underlying implementations rather
+than separate duplicate kernel implementations.
+
+## P0.4.3 — Q8_K
+
+Audit the exact role of Q8_K in GGUF models and implement it when
+required by the supported inference paths.
+
+Q8_K may be required as an intermediate/helper representation even when
+it is not directly used as the primary model quantization profile.
+
+## P0.4.4 — IQ Quantization
+
+Audit the IQ family separately.
+
+Candidate types include:
+
+- IQ1_S
+- IQ1_M
+- IQ2_XXS
+- IQ2_XS
+- IQ2_S
+- IQ3_XXS
+- IQ3_S
+- IQ4_NL
+- IQ4_XS
+
+Additional upstream IQ types must be evaluated against the current GGML
+master before implementation.
+
+Do not begin IQ implementation until the traditional and K-quant groups
+are stable.
+
+## P0.4.5 — Ternary / New Quantization Families
+
+Audit and, where justified, support:
+
+- TQ1_0
+- TQ2_0
+- newer GGML quantization families
+
+These remain lower priority than the traditional and K-quant families.
+
+---
+
+# 🟥 P0.5 — Vector Backend Freeze
+
+The current Vector backend is not a development target during the
+quantization expansion phase.
+
+Current policy:
+
+- do not delete VectorBackend
+- do not add new quantization kernels to VectorBackend
+- do not perform major VectorBackend refactoring
+- keep existing tests passing
+- preserve the implementation for historical comparison and regression
+  testing
+
+VectorBackend will eventually be superseded by instruction-set-specific
+backends.
+
+---
+
+# 🟨 P1 — SSE2 Backend
+
+Create an explicit CPU instruction-set backend based on the x86-64
+baseline.
+
+Goals:
+
+- define the backend capability boundary
+- determine the appropriate SSE2 implementation strategy
+- preserve a portable fallback
+- reuse validated quantization semantics
+- benchmark against Scalar
+- verify numerical equivalence
+
+The SSE2 backend should not duplicate model-specific logic.
+
+Quantization and model semantics remain separate from instruction-set
+specialization.
+
+---
+
+# 🟨 P1 — AVX2 Backend
+
+Create an AVX2 backend after the SSE2 architecture is established.
+
+Goals:
+
+- AVX2-specific kernels
+- efficient F32 operations
+- efficient quantized dot products
+- reuse the same model and tensor abstractions
+- verify numerical equivalence against Scalar
+- benchmark against SSE2 and Scalar
+
+AVX2 must not become a second model implementation.
+
+---
+
+# 🟨 P1 — Backend Selection & Discovery
+
+Extend backend discovery/runtime so that CPU instruction-set support
+determines the appropriate backend.
+
+Expected fallback direction:
+
+    AVX2
+      ↓
+    SSE2
+      ↓
+    Scalar
+
+The exact discovery mechanism must remain consistent with the existing
+BackendDiscovery / BackendDescriptor / BackendRuntime architecture.
+
+Backend selection must be capability-driven rather than based on model
+architecture.
+
+---
+
+# 🟨 P1 — CUDA Backend
+
+After the CPU backend architecture is stable, implement CUDA support.
+
+The first CUDA milestone is intentionally narrow:
+
+    CUDA Backend
+        ↓
+    Qwen2.5-0.5B
+        ↓
+    F16 / currently supported quantization
+        ↓
+    Correct inference
+        ↓
+    Benchmark
+
+The primary purpose is to move the Golden Reference test workload onto
+the GPU so that larger quantization matrices and future models can be
+tested without the current CPU runtime cost.
+
+CUDA implementation should not begin until:
+
+- Scalar correctness is stable
+- quantization abstractions are stable
+- SSE2/AVX2 backend boundaries are established
+- Qwen2.5-0.5B Golden Reference tests are reliable
+
+---
+
+# 🟨 P1 — Production CPU Validation
+
+After Scalar, SSE2 and AVX2 are available:
+
+- benchmark all three CPU paths
+- validate numerical consistency
+- validate deterministic generation
+- measure CPU utilization
+- measure memory usage
+- identify regression cases
+- establish realistic performance expectations
+
+Production-level optimization should be evidence-driven.
+
+---
+
+# 🟦 P2 — CPU Performance Optimization
+
+These optimizations are intentionally deferred until the backend and
+quantization architecture is stable.
+
+## P2.1 — MatMul
+
+Investigate:
+
+- cache behavior
+- work partitioning
+- memory access patterns
+- quantized dot-product kernels
+- vector width
+- batching
+- allocation overhead
+
+## P2.2 — RoPE
+
+Investigate:
+
+- precomputed frequencies
+- reusable sin/cos values
+- memory layout
+- parallel granularity
+
+## P2.3 — Attention
+
+Investigate:
+
+- KV-cache layout
+- score calculation
+- softmax
+- value accumulation
+- temporary allocations
+- cache locality
+
+## P2.4 — Memory
+
+Investigate:
+
+- Tensor allocation frequency
+- ArrayPool usage
+- temporary buffers
+- KV-cache allocation
+- zero-copy views
+- model loading memory footprint
+
+## P2.5 — Managed vs Unsafe Memory
+
+Prefer safe managed-memory implementations.
+
+Only introduce `unsafe` code if:
+
+1. a specific bottleneck is measured,
+2. a safe implementation has been benchmarked,
+3. the unsafe implementation provides a meaningful improvement,
+4. the complexity and maintenance cost are justified.
+
+---
+
+# 🟦 P2 — Additional Model Architecture
+
+After Qwen2.5-0.5B support and the CPU/GPU backend architecture are
+stable, begin additional model architectures.
+
+## P2.1 — Gemma 4
+
+Gemma 4 is the first additional architecture currently planned.
+
+Goals:
+
+- verify Gemma 4 GGUF metadata
+- verify tokenizer requirements
+- determine whether a dedicated tokenizer is required
+- define Gemma 4-specific ModelConfig fields
+- implement Gemma 4 model semantics
+- validate attention and RoPE behavior
+- validate normalization
+- validate MLP activation
+- validate embedding scaling
+- validate output projection
+- validate against a known-good implementation
+
+Gemma 1, Gemma 2 and Gemma 3 remain out of scope unless a future
+requirement justifies them.
 
 ---
 
@@ -240,24 +661,44 @@ Not currently scheduled:
 - Gemma 1
 - Gemma 2
 - Gemma 3
-- Additional architectures as required
+- additional Qwen architectures
+- Mistral
+- other architectures as required
 
-New architectures should be added through the model architecture capability boundary rather than by expanding generic model code with architecture-specific conditionals.
+New architectures must use the model architecture capability boundary
+rather than expanding generic backend code with architecture-specific
+conditionals.
 
 ---
 
 # Development Rules
 
-- Scalar remains the correctness/reference backend.
-- Vector remains the current SIMD backend.
+- Qwen2.5-0.5B is the current Golden Reference Model.
+- F16 is the primary numerical reference for quantized Qwen2.5-0.5B.
+- Scalar is the correctness/reference backend.
+- Scalar must support practical multi-threaded execution.
+- VectorBackend is frozen until superseded by SSE2/AVX2.
+- Quantization base types and mixed quantization profiles are separate
+  concepts.
+- Do not implement separate kernels merely because a mixed profile has a
+  different name.
 - Correctness takes priority over performance.
-- Performance changes should be benchmark-driven.
-- Benchmark output must remain observable when validating inference changes.
-- Avoid `unsafe` unless there is measured justification.
+- Performance changes must be benchmark-driven.
+- Every new quantization type requires automated tests.
+- Unsupported GGUF types must fail clearly.
+- Do not silently reinterpret an unsupported tensor type.
+- Avoid `unsafe` unless measured evidence justifies it.
 - Avoid premature architecture-specific optimization.
 - Tensor-format discovery continues to use reflection + caching.
-- Do not reintroduce the removed `IQuantizer` / `IQuantizedDotProduct` abstraction without a demonstrated need.
-- GGUF is the model storage format.
-- The initial runtime target is Windows x64.
-- GitHub `master` is the authoritative current source when it differs from previously pasted code.
-- When current GitHub code and previous conversation context disagree and the reason for the difference is unclear, confirm with the user before making architectural assumptions.
+- Do not reintroduce the removed `IQuantizer` / `IQuantizedDotProduct`
+  abstractions without a demonstrated architectural need.
+- GGUF remains the model storage format.
+- Windows x64 remains the initial runtime target.
+- GitHub `master` is the authoritative current source when it differs
+  from previously pasted code.
+- When current GitHub code and previous conversation context disagree
+  and the reason for the difference is unclear, confirm with the user
+  before making architectural assumptions.
+- `docs/QUANTIZATION_COVERAGE.md` is the authoritative quantization
+  coverage inventory.
+- Update documentation when an architectural decision changes.
