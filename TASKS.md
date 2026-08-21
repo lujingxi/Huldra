@@ -11,76 +11,101 @@ Priority levels:
 
 ---
 
-### P1 — Performance Investigation
-
-- [ ] Add MatMul parallelism instrumentation
-  - Measure requested worker count
-  - Measure maximum concurrent workers
-  - Measure distinct managed threads
-  - Measure distinct logical processors observed
-- [ ] Run Scalar / Vector × F16 / Q4_0 benchmark and record results
-- [ ] Use instrumentation results to determine the next parallelism optimization
-
 # 🟥 P0 — CPU Performance Baseline & Optimization
 
-The current CPU inference path is functionally working, but several
-backend/model combinations show poor CPU utilization and long test times.
+The current CPU inference path is functionally working, but several backend/model combinations show poor CPU utilization and long test times.
 
-The goal of this phase is **not** production-grade optimization.
+The goal of this phase is not production-grade optimization.
 
-The goal is to establish a reliable benchmark and remove obvious,
-low-risk performance bottlenecks before continuing with model support.
+The goal is to establish a reliable benchmark, identify obvious bottlenecks, and apply low-risk optimizations before continuing with broader model support.
 
 ## P0.1 — CLI Benchmark Harness
 
-- [ ] Accept one user prompt.
-- [ ] Run the same prompt against all four combinations:
-  - [ ] Scalar + F16
-  - [ ] Scalar + Q4_0
-  - [ ] Vector + F16
-  - [ ] Vector + Q4_0
-- [ ] Create a fresh inference context for every benchmark run.
-- [ ] Keep generation parameters identical between runs.
-- [ ] Report elapsed time.
-- [ ] Report generated token count.
-- [ ] Report tokens/second.
-- [ ] Present the four results in a clear summary.
+- [x] Accept one user prompt.
+- [x] Run the same prompt against all four combinations:
+  - Scalar + F16
+  - Scalar + Q4_0
+  - Vector + F16
+  - Vector + Q4_0
+- [x] Create a fresh inference context for every benchmark run.
+- [x] Keep generation parameters identical between runs.
+- [x] Use deterministic greedy sampling.
+- [x] Report elapsed time.
+- [x] Report generated token count.
+- [x] Report tokens/second.
+- [x] Present the four results in a clear summary.
+- [ ] Display the generated text for every benchmark case.
+- [ ] Verify that all four configurations produce identical deterministic output.
 
 ## P0.2 — Backend Parallelism Audit
 
-Investigate why several CPU workloads do not fully utilize available
-logical cores.
+Investigate why several CPU workloads do not fully utilize available logical cores.
 
-- [ ] Review `BackendParallel.For`.
-- [ ] Review Scalar backend MatMul partitioning.
-- [ ] Review Vector backend MatMul partitioning.
+### P0.2.1 — Instrumentation
+
+- [x] Add temporary MatMul parallelism instrumentation.
+- [x] Report configured worker count.
+- [x] Report maximum observed MatMul concurrency.
+- [x] Compare Scalar and Vector MatMul behavior.
+- [x] Establish a baseline before changing backend implementation.
+
+Current observation:
+
+- Scalar MatMul uses a single worker.
+- Vector MatMul uses all available workers.
+- Vector Q4_0 currently provides the strongest CPU utilization and performance.
+- Scalar F16 and Scalar Q4_0 are currently dominated by single-worker execution.
+
+### P0.2.2 — Scalar MatMul
+
+- [ ] Review Scalar MatMul partitioning.
+- [ ] Determine why Scalar MatMul is limited to a single worker.
+- [ ] Determine whether the limitation is intentional or accidental.
+- [ ] Test a low-risk parallel partitioning strategy.
+- [ ] Verify numerical results against the existing Scalar implementation.
+- [ ] Measure performance before and after the change.
+
+### P0.2.3 — Vector MatMul
+
+- [x] Confirm that Vector MatMul reaches multiple workers.
+- [ ] Investigate why Vector F16 remains substantially slower than Vector Q4_0 despite using multiple workers.
+- [ ] Determine whether the F16 fallback/dequantization path is responsible.
+- [ ] Do not change the Vector kernel until the cause is identified.
+
+### P0.2.4 — Other Backend Operations
+
+After MatMul:
+
 - [ ] Review RMSNorm parallelism.
 - [ ] Review Attention parallelism.
-- [ ] Identify workloads where parallel scheduling overhead exceeds
-      useful computation.
-- [ ] Verify that small workloads do not create unnecessary parallel
-      overhead.
+- [ ] Review RoPE parallelism.
+- [ ] Identify workloads where scheduling overhead exceeds useful computation.
+- [ ] Verify that small workloads do not create unnecessary parallel overhead.
 
 ## P0.3 — Low-Risk CPU Optimization
 
-Apply only optimizations that are clearly justified by the benchmark.
+Apply only optimizations justified by benchmark evidence.
 
 - [ ] Optimize parallel partitioning / work granularity where appropriate.
-- [ ] Avoid `unsafe` unless a later measurement demonstrates that it is
-      necessary.
+- [ ] Avoid unnecessary thread creation.
+- [ ] Avoid unnecessary repeated span conversion inside hot loops where practical.
+- [ ] Prefer safe managed-memory solutions.
+- [ ] Avoid `unsafe` unless later measurements demonstrate a meaningful benefit.
 - [ ] Avoid changing numerical semantics.
 - [ ] Avoid architecture-specific SIMD specialization at this stage.
 - [ ] Avoid premature kernel rewrites.
 
 ## P0.4 — Performance Regression Validation
 
+Every performance change must be validated against the established benchmark.
+
 - [ ] All existing tests pass.
 - [ ] Scalar backend remains the correctness/reference implementation.
-- [ ] Vector backend remains numerically consistent with Scalar within
-      appropriate tolerance.
+- [ ] Vector backend remains numerically consistent with Scalar within appropriate tolerance.
 - [ ] Benchmark results are recorded before and after optimization.
-- [ ] No optimization is accepted without a measurable improvement or
-      clear architectural justification.
+- [ ] Generated output remains deterministic under greedy sampling.
+- [ ] No optimization is accepted without measurable improvement or clear architectural justification.
+- [ ] Temporary instrumentation is removed or converted into a deliberate diagnostics facility once the audit is complete.
 
 ---
 
@@ -88,8 +113,7 @@ Apply only optimizations that are clearly justified by the benchmark.
 
 Gemma 4 is the first Gemma architecture currently targeted by Huldra.
 
-Gemma 1, Gemma 2 and Gemma 3 are not current targets and should not
-drive the architecture of the implementation.
+Gemma 1, Gemma 2 and Gemma 3 are not current targets and should not drive the architecture of the implementation.
 
 ## P0.5 — Gemma 4 Architecture
 
@@ -102,10 +126,8 @@ drive the architecture of the implementation.
 ## P0.6 — Gemma 4 Tokenizer
 
 - [ ] Verify Gemma 4 tokenizer metadata.
-- [ ] Determine whether `LlamaTokenizer` can correctly represent the
-      Gemma 4 tokenizer.
-- [ ] Introduce a dedicated tokenizer abstraction/implementation if
-      required.
+- [ ] Determine whether `LlamaTokenizer` can correctly represent the Gemma 4 tokenizer.
+- [ ] Introduce a dedicated tokenizer abstraction/implementation if required.
 - [ ] Validate special tokens and EOS handling.
 - [ ] Add tokenizer regression tests.
 
@@ -136,14 +158,13 @@ drive the architecture of the implementation.
 - [ ] Cover F32/F16 paths.
 - [ ] Cover Q4_0 paths.
 - [ ] Establish appropriate numerical tolerances.
+- [ ] Verify deterministic generation across supported CPU backends.
 
 ## P1.3 — Model / Backend Separation
 
 - [ ] Remove remaining model-family assumptions from generic backend code.
-- [ ] Remove remaining tensor-format hard-coding from model execution
-      paths.
-- [ ] Keep architecture-specific behavior inside model/context
-      implementations where appropriate.
+- [ ] Remove remaining tensor-format hard-coding from model execution paths.
+- [ ] Keep architecture-specific behavior inside model/context implementations where appropriate.
 
 ## P1.4 — Code Cleanup
 
@@ -151,13 +172,13 @@ drive the architecture of the implementation.
 - [ ] Remove obsolete compatibility code.
 - [ ] Review temporary allocations in inference paths.
 - [ ] Review validation duplication.
+- [ ] Review benchmark-only code and diagnostics boundaries.
 
 ---
 
 # 🟦 P2 — CPU Performance
 
-These optimizations should be driven by benchmark evidence rather than
-implemented speculatively.
+These optimizations should be driven by benchmark evidence rather than implemented speculatively.
 
 ## P2.1 — RoPE
 
@@ -221,9 +242,7 @@ Not currently scheduled:
 - Gemma 3
 - Additional architectures as required
 
-New architectures should be added through the model architecture
-capability boundary rather than by expanding generic model code with
-architecture-specific conditionals.
+New architectures should be added through the model architecture capability boundary rather than by expanding generic model code with architecture-specific conditionals.
 
 ---
 
@@ -233,10 +252,12 @@ architecture-specific conditionals.
 - Vector remains the current SIMD backend.
 - Correctness takes priority over performance.
 - Performance changes should be benchmark-driven.
+- Benchmark output must remain observable when validating inference changes.
 - Avoid `unsafe` unless there is measured justification.
 - Avoid premature architecture-specific optimization.
 - Tensor-format discovery continues to use reflection + caching.
-- Do not reintroduce the removed `IQuantizer` /
-  `IQuantizedDotProduct` abstraction without a demonstrated need.
+- Do not reintroduce the removed `IQuantizer` / `IQuantizedDotProduct` abstraction without a demonstrated need.
 - GGUF is the model storage format.
 - The initial runtime target is Windows x64.
+- GitHub `master` is the authoritative current source when it differs from previously pasted code.
+- When current GitHub code and previous conversation context disagree and the reason for the difference is unclear, confirm with the user before making architectural assumptions.
