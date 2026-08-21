@@ -61,7 +61,7 @@
 >
 > ## P0.1 — Quantization taxonomy audit
 >
-> [ ] Complete the GGML/GGUF quantization taxonomy used by Huldra.
+> [x] Complete the GGML/GGUF quantization taxonomy used by Huldra.
 >
 > The taxonomy must distinguish:
 >
@@ -117,7 +117,7 @@
 >
 > ## P0.2 — Quantization profiles vs tensor formats
 >
-> [ ] Explicitly document the distinction between:
+> [x] Explicitly document the distinction between:
 >
 > 1. A quantization profile / model file type.
 > 2. The actual tensor format stored in each tensor.
@@ -208,7 +208,7 @@
 >
 > ## P0.5 — Audit existing quantization infrastructure
 >
-> [ ] Verify that the existing:
+> [x] Verify that the existing:
 >
 > - TensorType
 > - TensorFormatDescriptor
@@ -221,8 +221,16 @@
 > model-family-specific switch statements.
 >
 > ---
+> 
+> ## P0.6 Scalar development performance            [ ]
+>     P0.6.1 Multi-threaded Scalar MatMul
+>     P0.6.2 Performance instrumentation         [x]
+>     P0.6.3 Benchmark / CLI usability
+>     P0.6.4 Basic allocation reduction
+> 
+> ---
 >
-> ## P0.6 — Complete classic quantization support
+> ## P0.7 — Complete classic quantization support
 >
 > [ ] Implement and test missing classic formats in ScalarBackend/runtime:
 >
@@ -235,7 +243,7 @@
 >
 > ---
 >
-> ## P0.7 — Implement K-quant support
+> ## P0.8 — Implement K-quant support
 >
 > [ ] Implement Scalar support for:
 >
@@ -260,7 +268,7 @@
 >
 > ---
 >
-> ## P0.8 — Mixed quantization profile validation
+> ## P0.9 — Mixed quantization profile validation
 >
 > [ ] Validate that Huldra can load a GGUF containing multiple tensor
 > quantization formats in the same model.
