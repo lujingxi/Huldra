@@ -223,10 +223,10 @@
 > ---
 > 
 > ## P0.6 Scalar development performance            [ ]
->     P0.6.1 Multi-threaded Scalar MatMul
->     P0.6.2 Performance instrumentation         [x]
->     P0.6.3 Benchmark / CLI usability
->     P0.6.4 Basic allocation reduction
+> [x] P0.6.2 Performance instrumentation
+> [x] P0.6.3 Benchmark / CLI usability
+> [ ] P0.6.1 Multi-threaded Scalar MatMul
+> [ ] P0.6.4 Basic allocation reduction
 > 
 > ---
 >
