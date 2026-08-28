@@ -1,10 +1,12 @@
-﻿using Huldra.Engine.Backends;
+﻿// Huldra-Verify: 0.6.1-2
+using Huldra.Engine.Backends;
 using Huldra.Engine.Quantization;
 using Huldra.Engine.Tensors;
 
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -12,26 +14,46 @@ namespace Huldra.Engine.Scalar;
 
 public sealed class ScalarBackend : IBackend
 {
+    private long _matMulCallCount;
+    private long _matMulTotalWork;
+    private long _matMulTotalElapsedTicks;
+
+    private long[]? _matMulWorkerWork;
+    private int _matMulWorkerCount;
+    private int _matMulMaxConcurrentWorkers;
+
     public int Priority => 0;
     public string Name => "Scalar";
     public bool IsSupported => true;
 
     public void MatMul(Tensor a, Tensor b, Tensor result)
     {
-        var (In, Out, SeqLen) = BackendValidation.ValidateMatMul(a, b, result);
+        var (In, Out, SeqLen) =
+    BackendValidation.ValidateMatMul(a, b, result);
 
-        // a (Weights): [InFeatures, OutFeatures] (Column-major from GGUF)
-        // b (Hidden): [SeqLen, InFeatures] (Row-major)
-        // result: [SeqLen, OutFeatures] (Row-major)
-        //
-        // Each output column is independent:
-        //
-        //   result[seq, o] = sum_i (a[i, o] * b[seq, i])
-        //
-        // We therefore parallelize over Out rather than SeqLen.
-        //
-        // This is important for token generation, where SeqLen is normally 1.
-        // Parallelizing over SeqLen would then always produce a single worker.
+        int workerCount = Math.Min(
+            Environment.ProcessorCount,
+            Math.Max(1, SeqLen));
+
+        if (_matMulWorkerWork is null ||
+            _matMulWorkerWork.Length != workerCount)
+        {
+            _matMulWorkerWork = new long[workerCount];
+
+            Volatile.Write(
+                ref _matMulWorkerCount,
+                workerCount);
+        }
+
+        long workload = checked(
+            (long)In *
+            Out *
+            SeqLen);
+
+        long startTimestamp = Stopwatch.GetTimestamp();
+
+        Interlocked.Increment(ref _matMulCallCount);
+        Interlocked.Add(ref _matMulTotalWork, workload);
 
         Memory<byte> aMemory;
         Memory<byte> bMemory;
@@ -40,11 +62,15 @@ public sealed class ScalarBackend : IBackend
         byte[]? aBuffer = null;
         byte[]? bBuffer = null;
 
-        int aByteSize = checked(In * Out * sizeof(float));
-        int bByteSize = checked(SeqLen * In * sizeof(float));
-
         try
         {
+            int aByteSize = checked(In * Out * sizeof(float));
+            int bByteSize = checked(SeqLen * In * sizeof(float));
+
+            // ------------------------------------------------------------
+            // 1. Prepare weight matrix
+            // ------------------------------------------------------------
+
             if (a.Type == TensorType.F32)
             {
                 aMemory = a.Data;
@@ -59,6 +85,10 @@ public sealed class ScalarBackend : IBackend
                     a.Data,
                     aMemory);
             }
+
+            // ------------------------------------------------------------
+            // 2. Prepare activation matrix
+            // ------------------------------------------------------------
 
             if (b.Type == TensorType.F32)
             {
@@ -75,41 +105,53 @@ public sealed class ScalarBackend : IBackend
                     bMemory);
             }
 
-            // Parallelize across output columns.
+            // ------------------------------------------------------------
+            // 3. MatMul
             //
-            // Every worker owns a disjoint range of output columns.
-            // Therefore workers never write to the same result element.
+            // IMPORTANT:
+            // Keep the current workload decomposition unchanged.
             //
-            // This also keeps the large weight column contiguous in memory:
-            //
-            //   aColumn = aSpan[o * In .. (o + 1) * In]
-            //
-            // which is the natural layout of GGUF's column-major weight
-            // representation used by this backend.
+            // P0.6.1 at this stage is instrumentation only.
+            // We are measuring why the current SeqLen-based decomposition
+            // produces poor CPU utilisation during token-by-token decode.
+            // ------------------------------------------------------------
+
             BackendParallel.For(
-                Out,
+                SeqLen,
                 1,
-                (start, end) =>
+                (start, end, workerIndex) =>
                 {
+                    long workerWork = checked(
+                        (long)(end - start) *
+                        Out *
+                        In);
+
+                    Interlocked.Add(
+                        ref _matMulWorkerWork![workerIndex],
+                        workerWork);
+
                     ReadOnlySpan<float> aSpan =
-                        MemoryMarshal.Cast<byte, float>(aMemory.Span);
+                        MemoryMarshal.Cast<byte, float>(
+                            aMemory.Span);
 
                     ReadOnlySpan<float> bSpan =
-                        MemoryMarshal.Cast<byte, float>(bMemory.Span);
+                        MemoryMarshal.Cast<byte, float>(
+                            bMemory.Span);
 
                     Span<float> resultSpan =
-                        MemoryMarshal.Cast<byte, float>(resultMemory.Span);
+                        MemoryMarshal.Cast<byte, float>(
+                            resultMemory.Span);
 
-                    for (int o = start; o < end; o++)
+                    for (int seq = start; seq < end; seq++)
                     {
-                        int aColOffset = o * In;
+                        int bRowOffset = seq * In;
+                        int resRowOffset = seq * Out;
 
-                        for (int seq = 0; seq < SeqLen; seq++)
+                        for (int o = 0; o < Out; o++)
                         {
-                            int bRowOffset = seq * In;
-                            int resultIndex = seq * Out + o;
-
                             float sum = 0f;
+
+                            int aColOffset = o * In;
 
                             for (int i = 0; i < In; i++)
                             {
@@ -118,7 +160,7 @@ public sealed class ScalarBackend : IBackend
                                     bSpan[bRowOffset + i];
                             }
 
-                            resultSpan[resultIndex] = sum;
+                            resultSpan[resRowOffset + o] = sum;
                         }
                     }
                 });
@@ -130,6 +172,13 @@ public sealed class ScalarBackend : IBackend
 
             if (bBuffer is not null)
                 ArrayPool<byte>.Shared.Return(bBuffer);
+
+            long elapsedTicks =
+                Stopwatch.GetTimestamp() - startTimestamp;
+
+            Interlocked.Add(
+                ref _matMulTotalElapsedTicks,
+                elapsedTicks);
         }
     }
 
@@ -684,5 +733,31 @@ public sealed class ScalarBackend : IBackend
             if (biasBuffer is not null)
                 ArrayPool<byte>.Shared.Return(biasBuffer);
         }
+    }
+
+    public MatMulWorkloadSnapshot GetMatMulWorkloadSnapshot()
+    {
+        long[] workerWork = _matMulWorkerWork is null
+            ? []
+            : (long[])_matMulWorkerWork.Clone();
+
+        return new MatMulWorkloadSnapshot(
+            Volatile.Read(ref _matMulCallCount),
+            Volatile.Read(ref _matMulTotalWork),
+            Volatile.Read(ref _matMulTotalElapsedTicks),
+            workerWork,
+            Volatile.Read(ref _matMulWorkerCount),
+            Volatile.Read(ref _matMulMaxConcurrentWorkers));
+    }
+
+    public void ResetMatMulWorkloadStatistics()
+    {
+        Volatile.Write(ref _matMulCallCount, 0);
+        Volatile.Write(ref _matMulTotalWork, 0);
+        Volatile.Write(ref _matMulTotalElapsedTicks, 0);
+        Volatile.Write(ref _matMulMaxConcurrentWorkers, 0);
+
+        if (_matMulWorkerWork is not null)
+            Array.Clear(_matMulWorkerWork);
     }
 }
