@@ -1,8 +1,10 @@
-﻿using System.Diagnostics;
-using System.Runtime.InteropServices;
+﻿// Huldra-Verify: 0.6.1-3
 using Huldra.Engine.Backends;
 using Huldra.Engine.Models;
 using Huldra.Engine.Sampling;
+using Huldra.Engine.Scalar;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace Huldra.Cli;
 
@@ -59,8 +61,11 @@ internal sealed class BenchmarkRunner
         BenchmarkCase benchmarkCase,
         string userPrompt)
     {
-        IBackend backend =
-            BackendRuntime.Instance.GetBackend(benchmarkCase.Backend);
+        IBackend backend = BackendRuntime.Instance.GetBackend(benchmarkCase.Backend);
+
+        // Initialize scalar backend workload statistics.
+        ScalarBackend? scalarBackend = backend is ScalarBackend ? backend as ScalarBackend : null;
+        scalarBackend?.ResetMatMulWorkloadStatistics();
 
         IModel model = benchmarkCase.Model;
         string prompt = model.ApplyChatTemplate(userPrompt);
@@ -224,6 +229,13 @@ internal sealed class BenchmarkRunner
             Console.WriteLine(output);
         }
 
+        // Print scalar backend workload statistics.
+        if (scalarBackend is not null)
+        {
+            MatMulWorkloadSnapshot snapshot = scalarBackend.GetMatMulWorkloadSnapshot();
+            PrintMatMulWorkload(snapshot);
+        }
+
         return new BenchmarkResult(
             benchmarkCase.Backend,
             benchmarkCase.Format,
@@ -264,6 +276,99 @@ internal sealed class BenchmarkRunner
         }
 
         Console.WriteLine(new string('=', 72));
+    }
+
+    private static void PrintMatMulWorkload(MatMulWorkloadSnapshot snapshot)
+    {
+        Console.WriteLine("MatMul workload:");
+
+        Console.WriteLine(
+            $"  Calls:              {snapshot.CallCount}");
+
+        Console.WriteLine(
+            $"  Total work:         {snapshot.TotalWork:N0}");
+
+        Console.WriteLine(
+            $"  Worker count:       {snapshot.WorkerCount}");
+
+        Console.WriteLine(
+            $"  Max concurrent:     {snapshot.MaxConcurrentWorkers}");
+
+        if (snapshot.WorkerWork.Length == 0)
+        {
+            Console.WriteLine(
+                "  Worker workload:    (none)");
+
+            return;
+        }
+
+        long minWork = long.MaxValue;
+        long maxWork = 0;
+        long totalWork = 0;
+        int activeWorkers = 0;
+
+        foreach (long work in snapshot.WorkerWork)
+        {
+            if (work <= 0)
+                continue;
+
+            activeWorkers++;
+
+            minWork = Math.Min(
+                minWork,
+                work);
+
+            maxWork = Math.Max(
+                maxWork,
+                work);
+
+            totalWork += work;
+        }
+
+        double averageWork =
+            activeWorkers == 0
+                ? 0
+                : (double)totalWork / activeWorkers;
+
+        double imbalance =
+            averageWork == 0
+                ? 0
+                : maxWork / averageWork;
+
+        Console.WriteLine(
+            $"  Active workers:    {activeWorkers}");
+
+        Console.WriteLine(
+            $"  Min worker work:   {minWork:N0}");
+
+        Console.WriteLine(
+            $"  Max worker work:   {maxWork:N0}");
+
+        Console.WriteLine(
+            $"  Average:            {averageWork:N0}");
+
+        Console.WriteLine(
+            $"  Imbalance:          {imbalance:F2}x");
+
+        double elapsedMs =
+            snapshot.TotalElapsedTicks *
+            1000.0 /
+            Stopwatch.Frequency;
+
+        Console.WriteLine(
+            $"  MatMul time:        {elapsedMs:N1} ms");
+
+        Console.WriteLine(
+            "  Worker workload:");
+
+        for (int i = 0;
+             i < snapshot.WorkerWork.Length;
+             i++)
+        {
+            Console.WriteLine(
+                $"    Worker {i,2}:       " +
+                $"{snapshot.WorkerWork[i],15:N0}");
+        }
     }
 
     private sealed record BenchmarkCase(

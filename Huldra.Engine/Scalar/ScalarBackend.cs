@@ -1,4 +1,4 @@
-﻿// Huldra-Verify: 0.6.1-2
+﻿// Huldra-Verify: 0.6.1-3
 using Huldra.Engine.Backends;
 using Huldra.Engine.Quantization;
 using Huldra.Engine.Tensors;
@@ -21,6 +21,7 @@ public sealed class ScalarBackend : IBackend
     private long[]? _matMulWorkerWork;
     private int _matMulWorkerCount;
     private int _matMulMaxConcurrentWorkers;
+    private int _matMulActiveWorkers;
 
     public int Priority => 0;
     public string Name => "Scalar";
@@ -28,8 +29,9 @@ public sealed class ScalarBackend : IBackend
 
     public void MatMul(Tensor a, Tensor b, Tensor result)
     {
-        var (In, Out, SeqLen) =
-    BackendValidation.ValidateMatMul(a, b, result);
+        long startTimestamp = Stopwatch.GetTimestamp();
+
+        var (In, Out, SeqLen) = BackendValidation.ValidateMatMul(a, b, result);
 
         int workerCount = Math.Min(
             Environment.ProcessorCount,
@@ -49,8 +51,6 @@ public sealed class ScalarBackend : IBackend
             (long)In *
             Out *
             SeqLen);
-
-        long startTimestamp = Stopwatch.GetTimestamp();
 
         Interlocked.Increment(ref _matMulCallCount);
         Interlocked.Add(ref _matMulTotalWork, workload);
@@ -116,20 +116,25 @@ public sealed class ScalarBackend : IBackend
             // produces poor CPU utilisation during token-by-token decode.
             // ------------------------------------------------------------
 
-            BackendParallel.For(
-                SeqLen,
-                1,
-                (start, end, workerIndex) =>
+            BackendParallel.For(Out, 1, (start, end, workerIndex) =>
+            {
+                long workerWork = checked(
+                    (long)(end - start) *
+                    SeqLen *
+                    In);
+
+                Interlocked.Add(
+                    ref _matMulWorkerWork![workerIndex],
+                    workerWork);
+
+                int activeWorkers =
+                    Interlocked.Increment(
+                        ref _matMulActiveWorkers);
+
+                UpdateMaxConcurrentWorkers(activeWorkers);
+
+                try
                 {
-                    long workerWork = checked(
-                        (long)(end - start) *
-                        Out *
-                        In);
-
-                    Interlocked.Add(
-                        ref _matMulWorkerWork![workerIndex],
-                        workerWork);
-
                     ReadOnlySpan<float> aSpan =
                         MemoryMarshal.Cast<byte, float>(
                             aMemory.Span);
@@ -142,16 +147,16 @@ public sealed class ScalarBackend : IBackend
                         MemoryMarshal.Cast<byte, float>(
                             resultMemory.Span);
 
-                    for (int seq = start; seq < end; seq++)
+                    for (int o = start; o < end; o++)
                     {
-                        int bRowOffset = seq * In;
-                        int resRowOffset = seq * Out;
+                        int aColOffset = o * In;
 
-                        for (int o = 0; o < Out; o++)
+                        for (int seq = 0; seq < SeqLen; seq++)
                         {
-                            float sum = 0f;
+                            int bRowOffset = seq * In;
+                            int resultIndex = seq * Out + o;
 
-                            int aColOffset = o * In;
+                            float sum = 0f;
 
                             for (int i = 0; i < In; i++)
                             {
@@ -160,25 +165,28 @@ public sealed class ScalarBackend : IBackend
                                     bSpan[bRowOffset + i];
                             }
 
-                            resultSpan[resRowOffset + o] = sum;
+                            resultSpan[resultIndex] = sum;
                         }
                     }
-                });
+                }
+                finally
+                {
+                    Interlocked.Decrement(
+                        ref _matMulActiveWorkers);
+                }
+            });
         }
         finally
         {
+            Interlocked.Add(
+                ref _matMulTotalElapsedTicks,
+                Stopwatch.GetTimestamp() - startTimestamp);
+
             if (aBuffer is not null)
                 ArrayPool<byte>.Shared.Return(aBuffer);
 
             if (bBuffer is not null)
                 ArrayPool<byte>.Shared.Return(bBuffer);
-
-            long elapsedTicks =
-                Stopwatch.GetTimestamp() - startTimestamp;
-
-            Interlocked.Add(
-                ref _matMulTotalElapsedTicks,
-                elapsedTicks);
         }
     }
 
@@ -759,5 +767,26 @@ public sealed class ScalarBackend : IBackend
 
         if (_matMulWorkerWork is not null)
             Array.Clear(_matMulWorkerWork);
+    }
+
+    private void UpdateMaxConcurrentWorkers(int value)
+    {
+        while (true)
+        {
+            int current =
+                Volatile.Read(
+                    ref _matMulMaxConcurrentWorkers);
+
+            if (value <= current)
+                return;
+
+            if (Interlocked.CompareExchange(
+                    ref _matMulMaxConcurrentWorkers,
+                    value,
+                    current) == current)
+            {
+                return;
+            }
+        }
     }
 }
