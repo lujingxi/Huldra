@@ -5,5 +5,4 @@ public readonly record struct MatMulWorkloadSnapshot(
     long TotalWork,
     long TotalElapsedTicks,
     long[] WorkerWork,
-    int WorkerCount,
-    int MaxConcurrentWorkers);
+    int WorkerCount);

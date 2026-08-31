@@ -21,11 +21,19 @@ public sealed class ScalarBackend : IBackend
     private long[]? _matMulWorkerWork;
     private int _matMulWorkerCount;
     private int _matMulMaxConcurrentWorkers;
-    private int _matMulActiveWorkers;
 
     public int Priority => 0;
     public string Name => "Scalar";
     public bool IsSupported => true;
+
+    public ScalarBackend()
+    {
+        _matMulWorkerWork =
+            new long[Environment.ProcessorCount];
+
+        _matMulWorkerCount =
+            _matMulWorkerWork.Length;
+    }
 
     public void MatMul(Tensor a, Tensor b, Tensor result)
     {
@@ -33,19 +41,12 @@ public sealed class ScalarBackend : IBackend
 
         var (In, Out, SeqLen) = BackendValidation.ValidateMatMul(a, b, result);
 
-        int workerCount = Math.Min(
-            Environment.ProcessorCount,
-            Math.Max(1, SeqLen));
+        int maxWorkerSlots = Environment.ProcessorCount;
 
-        if (_matMulWorkerWork is null ||
-            _matMulWorkerWork.Length != workerCount)
-        {
-            _matMulWorkerWork = new long[workerCount];
+        long[] localWorkerWork =
+            new long[maxWorkerSlots];
 
-            Volatile.Write(
-                ref _matMulWorkerCount,
-                workerCount);
-        }
+        int localMaxConcurrentWorkers = 0;
 
         long workload = checked(
             (long)In *
@@ -116,26 +117,19 @@ public sealed class ScalarBackend : IBackend
             // produces poor CPU utilisation during token-by-token decode.
             // ------------------------------------------------------------
 
-            BackendParallel.For(Out, 1, (start, end, workerIndex) =>
-            {
-                long workerWork = checked(
-                    (long)(end - start) *
-                    SeqLen *
-                    In);
-
-                Interlocked.Add(
-                    ref _matMulWorkerWork![workerIndex],
-                    workerWork);
-
-                int activeWorkers =
-                    Interlocked.Increment(
-                        ref _matMulActiveWorkers);
-
-                UpdateMaxConcurrentWorkers(activeWorkers);
-
-                try
+            BackendParallel.For(
+                SeqLen,
+                1,
+                (start, end, workerIndex) =>
                 {
-                    ReadOnlySpan<float> aSpan =
+                    long workerWork = checked(
+                        (long)(end - start) *
+                        Out *
+                        In);
+
+                    localWorkerWork[workerIndex] += workerWork;
+
+                        ReadOnlySpan<float> aSpan =
                         MemoryMarshal.Cast<byte, float>(
                             aMemory.Span);
 
@@ -147,16 +141,16 @@ public sealed class ScalarBackend : IBackend
                         MemoryMarshal.Cast<byte, float>(
                             resultMemory.Span);
 
-                    for (int o = start; o < end; o++)
+                    for (int seq = start; seq < end; seq++)
                     {
-                        int aColOffset = o * In;
+                        int bRowOffset = seq * In;
+                        int resRowOffset = seq * Out;
 
-                        for (int seq = 0; seq < SeqLen; seq++)
+                        for (int o = 0; o < Out; o++)
                         {
-                            int bRowOffset = seq * In;
-                            int resultIndex = seq * Out + o;
-
                             float sum = 0f;
+
+                            int aColOffset = o * In;
 
                             for (int i = 0; i < In; i++)
                             {
@@ -165,16 +159,10 @@ public sealed class ScalarBackend : IBackend
                                     bSpan[bRowOffset + i];
                             }
 
-                            resultSpan[resultIndex] = sum;
+                            resultSpan[resRowOffset + o] = sum;
                         }
                     }
-                }
-                finally
-                {
-                    Interlocked.Decrement(
-                        ref _matMulActiveWorkers);
-                }
-            });
+                });     
         }
         finally
         {
@@ -745,25 +733,32 @@ public sealed class ScalarBackend : IBackend
 
     public MatMulWorkloadSnapshot GetMatMulWorkloadSnapshot()
     {
-        long[] workerWork = _matMulWorkerWork is null
-            ? []
-            : (long[])_matMulWorkerWork.Clone();
+        long[] workerWork =
+            _matMulWorkerWork is null
+                ? []
+                : (long[])_matMulWorkerWork.Clone();
 
         return new MatMulWorkloadSnapshot(
             Volatile.Read(ref _matMulCallCount),
             Volatile.Read(ref _matMulTotalWork),
             Volatile.Read(ref _matMulTotalElapsedTicks),
             workerWork,
-            Volatile.Read(ref _matMulWorkerCount),
-            Volatile.Read(ref _matMulMaxConcurrentWorkers));
+            Volatile.Read(ref _matMulWorkerCount));
     }
 
     public void ResetMatMulWorkloadStatistics()
     {
-        Volatile.Write(ref _matMulCallCount, 0);
-        Volatile.Write(ref _matMulTotalWork, 0);
-        Volatile.Write(ref _matMulTotalElapsedTicks, 0);
-        Volatile.Write(ref _matMulMaxConcurrentWorkers, 0);
+        Volatile.Write(
+            ref _matMulCallCount,
+            0);
+
+        Volatile.Write(
+            ref _matMulTotalWork,
+            0);
+
+        Volatile.Write(
+            ref _matMulTotalElapsedTicks,
+            0);
 
         if (_matMulWorkerWork is not null)
             Array.Clear(_matMulWorkerWork);

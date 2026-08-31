@@ -291,8 +291,7 @@ internal sealed class BenchmarkRunner
         Console.WriteLine(
             $"  Worker count:       {snapshot.WorkerCount}");
 
-        Console.WriteLine(
-            $"  Max concurrent:     {snapshot.MaxConcurrentWorkers}");
+        //Console.WriteLine($"  Max concurrent:     {snapshot.MaxConcurrentWorkers}");
 
         if (snapshot.WorkerWork.Length == 0)
         {
