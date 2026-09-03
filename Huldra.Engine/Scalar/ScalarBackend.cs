@@ -162,7 +162,21 @@ public sealed class ScalarBackend : IBackend
                             resultSpan[resRowOffset + o] = sum;
                         }
                     }
-                });     
+                });
+
+            for (int workerIndex = 0;
+                 workerIndex < localWorkerWork.Length;
+                 workerIndex++)
+            {
+                long workerWork = localWorkerWork[workerIndex];
+
+                if (workerWork == 0)
+                    continue;
+
+                Interlocked.Add(
+                    ref _matMulWorkerWork![workerIndex],
+                    workerWork);
+            }
         }
         finally
         {
