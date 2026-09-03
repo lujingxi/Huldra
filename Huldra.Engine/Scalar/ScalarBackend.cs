@@ -1,5 +1,4 @@
-﻿// Huldra-Verify: 0.6.1-3
-using Huldra.Engine.Backends;
+﻿using Huldra.Engine.Backends;
 using Huldra.Engine.Quantization;
 using Huldra.Engine.Tensors;
 
@@ -39,34 +38,52 @@ public sealed class ScalarBackend : IBackend
     {
         long startTimestamp = Stopwatch.GetTimestamp();
 
-        var (In, Out, SeqLen) = BackendValidation.ValidateMatMul(a, b, result);
+        var (In, Out, SeqLen) =
+            BackendValidation.ValidateMatMul(
+                a,
+                b,
+                result);
 
-        int maxWorkerSlots = Environment.ProcessorCount;
+        int maxWorkerSlots =
+            Environment.ProcessorCount;
 
         long[] localWorkerWork =
             new long[maxWorkerSlots];
 
-        int localMaxConcurrentWorkers = 0;
+        long workload =
+            checked(
+                (long)In *
+                Out *
+                SeqLen);
 
-        long workload = checked(
-            (long)In *
-            Out *
-            SeqLen);
+        Interlocked.Increment(
+            ref _matMulCallCount);
 
-        Interlocked.Increment(ref _matMulCallCount);
-        Interlocked.Add(ref _matMulTotalWork, workload);
+        Interlocked.Add(
+            ref _matMulTotalWork,
+            workload);
 
         Memory<byte> aMemory;
         Memory<byte> bMemory;
-        Memory<byte> resultMemory = result.Data;
+        Memory<byte> resultMemory =
+            result.Data;
 
         byte[]? aBuffer = null;
         byte[]? bBuffer = null;
 
         try
         {
-            int aByteSize = checked(In * Out * sizeof(float));
-            int bByteSize = checked(SeqLen * In * sizeof(float));
+            int aByteSize =
+                checked(
+                    In *
+                    Out *
+                    sizeof(float));
+
+            int bByteSize =
+                checked(
+                    SeqLen *
+                    In *
+                    sizeof(float));
 
             // ------------------------------------------------------------
             // 1. Prepare weight matrix
@@ -78,8 +95,14 @@ public sealed class ScalarBackend : IBackend
             }
             else
             {
-                aBuffer = ArrayPool<byte>.Shared.Rent(aByteSize);
-                aMemory = aBuffer.AsMemory(0, aByteSize);
+                aBuffer =
+                    ArrayPool<byte>.Shared.Rent(
+                        aByteSize);
+
+                aMemory =
+                    aBuffer.AsMemory(
+                        0,
+                        aByteSize);
 
                 QuantizationRuntime.Dequantize(
                     a.Type,
@@ -97,8 +120,14 @@ public sealed class ScalarBackend : IBackend
             }
             else
             {
-                bBuffer = ArrayPool<byte>.Shared.Rent(bByteSize);
-                bMemory = bBuffer.AsMemory(0, bByteSize);
+                bBuffer =
+                    ArrayPool<byte>.Shared.Rent(
+                        bByteSize);
+
+                bMemory =
+                    bBuffer.AsMemory(
+                        0,
+                        bByteSize);
 
                 QuantizationRuntime.Dequantize(
                     b.Type,
@@ -109,27 +138,41 @@ public sealed class ScalarBackend : IBackend
             // ------------------------------------------------------------
             // 3. MatMul
             //
-            // IMPORTANT:
-            // Keep the current workload decomposition unchanged.
+            // Work is partitioned across the complete output matrix:
             //
-            // P0.6.1 at this stage is instrumentation only.
-            // We are measuring why the current SeqLen-based decomposition
-            // produces poor CPU utilisation during token-by-token decode.
+            //     Result = [SeqLen, Out]
+            //
+            // Instead of partitioning only by SeqLen, flatten the output
+            // matrix into SeqLen * Out independent output elements.
+            //
+            // This is important for token-by-token decode where:
+            //
+            //     SeqLen == 1
+            //
+            // Partitioning by SeqLen would therefore create only one worker.
+            // Partitioning by output elements allows all available workers
+            // to participate.
             // ------------------------------------------------------------
 
+            int outputElementCount =
+                checked(
+                    SeqLen *
+                    Out);
+
             BackendParallel.For(
-                SeqLen,
+                outputElementCount,
                 1,
                 (start, end, workerIndex) =>
                 {
-                    long workerWork = checked(
-                        (long)(end - start) *
-                        Out *
-                        In);
+                    long workerWork =
+                        checked(
+                            (long)(end - start) *
+                            In);
 
-                    localWorkerWork[workerIndex] += workerWork;
+                    localWorkerWork[workerIndex] +=
+                        workerWork;
 
-                        ReadOnlySpan<float> aSpan =
+                    ReadOnlySpan<float> aSpan =
                         MemoryMarshal.Cast<byte, float>(
                             aMemory.Span);
 
@@ -141,26 +184,38 @@ public sealed class ScalarBackend : IBackend
                         MemoryMarshal.Cast<byte, float>(
                             resultMemory.Span);
 
-                    for (int seq = start; seq < end; seq++)
+                    for (int index = start;
+                         index < end;
+                         index++)
                     {
-                        int bRowOffset = seq * In;
-                        int resRowOffset = seq * Out;
+                        int seq =
+                            index / Out;
 
-                        for (int o = 0; o < Out; o++)
+                        int o =
+                            index % Out;
+
+                        int bRowOffset =
+                            seq * In;
+
+                        int resultIndex =
+                            seq * Out + o;
+
+                        int aColOffset =
+                            o * In;
+
+                        float sum = 0f;
+
+                        for (int i = 0;
+                             i < In;
+                             i++)
                         {
-                            float sum = 0f;
-
-                            int aColOffset = o * In;
-
-                            for (int i = 0; i < In; i++)
-                            {
-                                sum +=
-                                    aSpan[aColOffset + i] *
-                                    bSpan[bRowOffset + i];
-                            }
-
-                            resultSpan[resRowOffset + o] = sum;
+                            sum +=
+                                aSpan[aColOffset + i] *
+                                bSpan[bRowOffset + i];
                         }
+
+                        resultSpan[resultIndex] =
+                            sum;
                     }
                 });
 
@@ -168,7 +223,8 @@ public sealed class ScalarBackend : IBackend
                  workerIndex < localWorkerWork.Length;
                  workerIndex++)
             {
-                long workerWork = localWorkerWork[workerIndex];
+                long workerWork =
+                    localWorkerWork[workerIndex];
 
                 if (workerWork == 0)
                     continue;
@@ -182,13 +238,16 @@ public sealed class ScalarBackend : IBackend
         {
             Interlocked.Add(
                 ref _matMulTotalElapsedTicks,
-                Stopwatch.GetTimestamp() - startTimestamp);
+                Stopwatch.GetTimestamp() -
+                startTimestamp);
 
             if (aBuffer is not null)
-                ArrayPool<byte>.Shared.Return(aBuffer);
+                ArrayPool<byte>.Shared.Return(
+                    aBuffer);
 
             if (bBuffer is not null)
-                ArrayPool<byte>.Shared.Return(bBuffer);
+                ArrayPool<byte>.Shared.Return(
+                    bBuffer);
         }
     }
 

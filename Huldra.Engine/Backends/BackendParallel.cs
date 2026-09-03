@@ -1,5 +1,4 @@
-﻿// Huldra-Verify: 0.6.1-3
-namespace Huldra.Engine.Backends;
+﻿namespace Huldra.Engine.Backends;
 
 public static class BackendParallel
 {
