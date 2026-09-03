@@ -1,12 +1,11 @@
-﻿// Huldra-Verify: 0.6.1-3
-using Huldra.Engine.Backends;
+﻿using Huldra.Engine.Backends;
 using Huldra.Engine.Models;
 using Huldra.Engine.Sampling;
 using Huldra.Engine.Scalar;
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.InteropServices;
-
-namespace Huldra.Cli;
+using static Huldra.Engine.Backends.BackendParallel;
 
 internal sealed class BenchmarkRunner
 {
@@ -61,16 +60,35 @@ internal sealed class BenchmarkRunner
         BenchmarkCase benchmarkCase,
         string userPrompt)
     {
-        IBackend backend = BackendRuntime.Instance.GetBackend(benchmarkCase.Backend);
+        IBackend backend =
+            BackendRuntime.Instance.GetBackend(
+                benchmarkCase.Backend);
 
-        // Initialize scalar backend workload statistics.
-        ScalarBackend? scalarBackend = backend is ScalarBackend ? backend as ScalarBackend : null;
+        ScalarBackend? scalarBackend =
+            backend as ScalarBackend;
+
+        /*
+         * Reset Scalar MatMul workload statistics before this
+         * benchmark case.
+         */
         scalarBackend?.ResetMatMulWorkloadStatistics();
 
-        IModel model = benchmarkCase.Model;
-        string prompt = model.ApplyChatTemplate(userPrompt);
+        /*
+         * Reset BackendParallel execution instrumentation before
+         * this benchmark case.
+         *
+         * This is separate from ScalarBackend's MatMul workload
+         * instrumentation.
+         */
+        BackendParallel.ResetInstrumentation();
 
-        int[] tokenBuffer = new int[TokenBufferSize];
+        IModel model = benchmarkCase.Model;
+
+        string prompt =
+            model.ApplyChatTemplate(userPrompt);
+
+        int[] tokenBuffer =
+            new int[TokenBufferSize];
 
         int tokenCount =
             model.Tokenizer.Encode(
@@ -98,16 +116,18 @@ internal sealed class BenchmarkRunner
             tokens.Add(tokenBuffer[i]);
         }
 
-        // Keep generated tokens separately from the full context.
-        //
-        // "tokens" contains:
-        //   prompt + generated tokens
-        //
-        // "generatedTokenIds" contains:
-        //   generated tokens only
-        //
-        // This lets us decode the actual model output without
-        // accidentally decoding the prompt/chat template again.
+        /*
+         * Keep generated tokens separately from the full context.
+         *
+         * "tokens" contains:
+         *   prompt + generated tokens
+         *
+         * "generatedTokenIds" contains:
+         *   generated tokens only
+         *
+         * This lets us decode the actual model output without
+         * accidentally decoding the prompt/chat template again.
+         */
         List<int> generatedTokenIds =
             new(MaxGeneratedTokens);
 
@@ -121,8 +141,8 @@ internal sealed class BenchmarkRunner
         /*
          * Every benchmark gets a completely fresh context.
          *
-         * The model itself is reused, but the KV cache and inference state
-         * are not shared between benchmark cases.
+         * The model itself is reused, but the KV cache and inference
+         * state are not shared between benchmark cases.
          */
         IContext context =
             model.CreateContext(
@@ -132,9 +152,9 @@ internal sealed class BenchmarkRunner
         /*
          * Use greedy sampling for benchmarking.
          *
-         * This avoids randomness between benchmark runs and avoids the
-         * full vocabulary sort performed by the normal temperature/top-k/
-         * top-p sampler.
+         * This avoids randomness between benchmark runs and avoids
+         * the full vocabulary sort performed by the normal
+         * temperature/top-k/top-p sampler.
          */
         var sampler = new Sampler(
             new SamplerConfig
@@ -146,7 +166,12 @@ internal sealed class BenchmarkRunner
 
         int generatedTokens = 0;
 
-        Stopwatch stopwatch = Stopwatch.StartNew();
+        /*
+         * Start the benchmark timer only after all benchmark setup
+         * has completed.
+         */
+        Stopwatch stopwatch =
+            Stopwatch.StartNew();
 
         using (BackendParallelInstrumentation.Begin())
         {
@@ -179,11 +204,25 @@ internal sealed class BenchmarkRunner
                     break;
 
                 tokens.Add(nextToken);
+
+                /*
+                 * Keep the generated token ID so that the actual
+                 * model output can be decoded after the benchmark.
+                 */
+                generatedTokenIds.Add(nextToken);
+
                 generatedTokens++;
             }
         }
 
         stopwatch.Stop();
+
+        /*
+         * Capture BackendParallel instrumentation immediately after
+         * the inference loop.
+         */
+        BackendParallelSnapshot parallelSnapshot =
+            BackendParallel.GetInstrumentationSnapshot();
 
         BackendParallelStats? parallelStats =
             BackendParallelInstrumentation.LastStats;
@@ -215,8 +254,21 @@ internal sealed class BenchmarkRunner
                 $"logical-processors={parallelStats.DistinctLogicalProcessors}");
         }
 
-        string output = model.Tokenizer.Decode(
-            CollectionsMarshal.AsSpan(generatedTokenIds));
+        Console.WriteLine();
+
+        /*
+         * Print the actual BackendParallel execution data.
+         *
+         * This tells us whether the worker indexes supplied by
+         * BackendParallel actually reached the MatMul callback.
+         */
+        PrintBackendParallel(parallelSnapshot);
+
+        Console.WriteLine();
+
+        string output =
+            model.Tokenizer.Decode(
+                CollectionsMarshal.AsSpan(generatedTokenIds));
 
         Console.WriteLine("Output:");
 
@@ -229,10 +281,19 @@ internal sealed class BenchmarkRunner
             Console.WriteLine(output);
         }
 
-        // Print scalar backend workload statistics.
+        /*
+         * Print ScalarBackend-specific MatMul workload statistics.
+         *
+         * VectorBackend does not currently expose the same
+         * MatMulWorkloadSnapshot, so this remains Scalar-only.
+         */
         if (scalarBackend is not null)
         {
-            MatMulWorkloadSnapshot snapshot = scalarBackend.GetMatMulWorkloadSnapshot();
+            MatMulWorkloadSnapshot snapshot =
+                scalarBackend.GetMatMulWorkloadSnapshot();
+
+            Console.WriteLine();
+
             PrintMatMulWorkload(snapshot);
         }
 
@@ -278,7 +339,8 @@ internal sealed class BenchmarkRunner
         Console.WriteLine(new string('=', 72));
     }
 
-    private static void PrintMatMulWorkload(MatMulWorkloadSnapshot snapshot)
+    private static void PrintMatMulWorkload(
+        MatMulWorkloadSnapshot snapshot)
     {
         Console.WriteLine("MatMul workload:");
 
@@ -290,8 +352,6 @@ internal sealed class BenchmarkRunner
 
         Console.WriteLine(
             $"  Worker count:       {snapshot.WorkerCount}");
-
-        //Console.WriteLine($"  Max concurrent:     {snapshot.MaxConcurrentWorkers}");
 
         if (snapshot.WorkerWork.Length == 0)
         {
@@ -367,6 +427,49 @@ internal sealed class BenchmarkRunner
             Console.WriteLine(
                 $"    Worker {i,2}:       " +
                 $"{snapshot.WorkerWork[i],15:N0}");
+        }
+    }
+
+    private static void PrintBackendParallel(
+        BackendParallelSnapshot snapshot)
+    {
+        Console.WriteLine("BackendParallel execution:");
+
+        Console.WriteLine(
+            $"  Callbacks:             {snapshot.CallbackCount}");
+
+        int activeWorkers =
+            BitOperations.PopCount(
+                (ulong)snapshot.WorkerMask);
+
+        Console.WriteLine(
+            $"  Active workers:        {activeWorkers}");
+
+        Console.WriteLine(
+            $"  Worker mask:           0x{snapshot.WorkerMask:X}");
+
+        Console.WriteLine(
+            "  Worker callbacks:");
+
+        if (snapshot.CallbackCount == 0)
+        {
+            Console.WriteLine(
+                "    (none)");
+
+            return;
+        }
+
+        for (int workerIndex = 0;
+             workerIndex < 64;
+             workerIndex++)
+        {
+            bool executed =
+                (snapshot.WorkerMask &
+                 (1L << workerIndex)) != 0;
+
+            Console.WriteLine(
+                $"    Worker {workerIndex,2}: " +
+                $"{(executed ? "executed" : "not executed")}");
         }
     }
 
