@@ -1,9 +1,10 @@
 namespace Huldra.Agent.Models;
 
+/// <summary>
+/// Defines the decision for a security category.
+/// </summary>
 public sealed class SecurityRule
 {
-    public required string Category { get; init; }
-
     public required SecurityDecisionKind Decision { get; init; }
 
     /// <summary>

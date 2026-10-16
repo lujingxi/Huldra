@@ -9,6 +9,8 @@ public sealed class AuditEvent
 
     public required DateTimeOffset Timestamp { get; init; }
 
+    public required AuditEventType EventType { get; init; }
+
     public string? ProjectId { get; init; }
 
     public string? ConversationId { get; init; }
