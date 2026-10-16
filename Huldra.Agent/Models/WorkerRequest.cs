@@ -11,7 +11,7 @@ public sealed class WorkerRequest
 
     public required string ModelId { get; init; }
 
-    public required IReadOnlyList<string> RequestedTools { get; init; }
+    public required IReadOnlySet<string> RequestedTools { get; init; }
 
     public required string Task { get; init; }
 }

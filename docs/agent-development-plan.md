@@ -156,42 +156,61 @@ A Worker cannot grant itself additional capabilities.
 
 # 3. Development Phases
 
-## Phase 0 — Repository Baseline and Cleanup
+### Phase 0 — Repository Baseline and Cleanup
 
-### Objectives
+**Status: Completed**
 
-Establish the new Agent foundation without carrying unnecessary assumptions from the previous implementation.
+#### Completed
+- [x] Establish the current repository baseline and verify the active project structure.
+- [x] Remove the obsolete Agent architecture, including the old orchestrator, dynamic role executor, role definition model, legacy tool interface, and conflicting tool implementations.
+- [x] Remove obsolete services and models that conflict with the new architecture.
+- [x] Remove the unnecessary `HtmlAgilityPack` dependency.
+- [x] Preserve the `Huldra.Agent` project and its required project configuration.
+- [x] Preserve the Markdown-based default role definitions under `Resources/DefaultRoles`.
+- [x] Establish the initial domain model files for the new architecture.
+- [x] Verify that `Huldra.Agent` builds successfully.
 
-**Current status: In progress**
+#### Completion Notes
+The old orchestration, service, and tool implementation has been removed from the `Huldra.Agent` project. The project now contains the initial domain models and Markdown role resources, providing a clean foundation for the new Runtime-oriented architecture.
 
-#### Confirmed
-- [x] Confirm active Git branch: `dev_agent_0.1.0`.
-- [x] Inspect the `Huldra.Agent` project file and representative domain model files.
-- [x] Remove the obsolete `AgentOrchestrator` implementation.
-- [x] Remove the obsolete `DynamicRoleExecutor` implementation.
-- [x] Remove the obsolete `RoleDefinition` model.
-- [x] Remove the obsolete `IAgentTool` interface.
-- [x] Remove the obsolete `FetchWebpageTool` implementation.
-
-#### Remaining
-- [ ] Record and verify the branch/version verification marker.
-- [ ] Complete inspection of the remaining `Huldra.Agent` project structure.
-- [ ] Remove the unnecessary `HtmlAgilityPack` dependency.
-- [ ] Verify that no conflicting legacy Agent, Role, or Tool implementations remain.
-- [ ] Build `Huldra.Agent` successfully before declaring Phase 0 complete.
-
-#### Completion Criteria
-
-`Huldra.Agent` contains no dependency on the obsolete orchestration architecture, no unnecessary third-party dependencies, and builds successfully.
-
-Phase 1 domain model files may already exist during this cleanup phase; their presence does not by itself mark Phase 0 as complete.
-
+The existence of initial domain model files does not mean those models have completed design review or integration testing. These activities belong to Phase 1 and subsequent phases.
 
 ---
 
 # 4. Phase 1 — Core Domain Models
 
-Implement the smallest possible domain model.
+**Status: In progress**
+
+Initial model files have been created under `Huldra.Agent/Models`. Review the existing implementations against the agreed architecture before adding or changing models.
+
+#### Review Scope
+- [ ] `Role`
+- [ ] `WorkerRequest`
+- [ ] `Worker`
+- [ ] `WorkerContext`
+- [ ] `WorkerStatus`
+- [ ] `ContextMessage`
+- [ ] `ToolRequest`
+- [ ] `ToolResult`
+- [ ] `SecurityPolicy`
+- [ ] `SecurityRule`
+- [ ] `SecurityCategory`
+- [ ] `SecurityDecision`
+- [ ] `SecurityDecisionKind`
+- [ ] `AuditEvent`
+
+#### Review Requirements
+- `Role` remains minimal: role name and Markdown definition path.
+- Requested tools and granted tools remain distinct.
+- Workers cannot grant themselves permissions or create other Workers directly.
+- Security decisions use stable, language-neutral identifiers.
+- Audit events contain structured information and do not store LLM chain-of-thought.
+- Domain models remain independent of SQLite, UI, and concrete LLM provider implementations.
+- Model responsibilities, nullability, collection mutability, and lifecycle semantics are reviewed before the domain model phase is declared complete.
+
+#### Completion Criteria
+All core domain models have been reviewed and corrected where necessary. Their responsibilities and invariants are documented, and the model layer builds successfully without introducing Runtime, UI, persistence, or provider-specific dependencies prematurely.
+
 
 ## Role
 
