@@ -162,22 +162,30 @@ A Worker cannot grant itself additional capabilities.
 
 Establish the new Agent foundation without carrying unnecessary assumptions from the previous implementation.
 
-### Tasks
+**Current status: In progress**
 
-* [ ] Confirm active Git branch.
-* [ ] Record the branch/version verification marker.
-* [ ] Inspect current `Huldra.Agent` project structure.
-* [ ] Remove obsolete Agent architecture.
-* [ ] Remove hard-coded default Role implementation.
-* [ ] Remove obsolete Agent orchestration implementation.
-* [ ] Remove obsolete Tool implementations where they conflict with the new Tool model.
-* [ ] Remove unnecessary third-party dependencies from Agent.
-* [ ] Preserve useful code only where it does not conflict with the new architecture.
-* [ ] Ensure the project builds before introducing the new foundation.
+#### Confirmed
+- [x] Confirm active Git branch: `dev_agent_0.1.0`.
+- [x] Inspect the `Huldra.Agent` project file and representative domain model files.
+- [x] Remove the obsolete `AgentOrchestrator` implementation.
+- [x] Remove the obsolete `DynamicRoleExecutor` implementation.
+- [x] Remove the obsolete `RoleDefinition` model.
+- [x] Remove the obsolete `IAgentTool` interface.
+- [x] Remove the obsolete `FetchWebpageTool` implementation.
 
-### Completion Criteria
+#### Remaining
+- [ ] Record and verify the branch/version verification marker.
+- [ ] Complete inspection of the remaining `Huldra.Agent` project structure.
+- [ ] Remove the unnecessary `HtmlAgilityPack` dependency.
+- [ ] Verify that no conflicting legacy Agent, Role, or Tool implementations remain.
+- [ ] Build `Huldra.Agent` successfully before declaring Phase 0 complete.
 
-`Huldra.Agent` contains no dependency on the old orchestration architecture and builds successfully.
+#### Completion Criteria
+
+`Huldra.Agent` contains no dependency on the obsolete orchestration architecture, no unnecessary third-party dependencies, and builds successfully.
+
+Phase 1 domain model files may already exist during this cleanup phase; their presence does not by itself mark Phase 0 as complete.
+
 
 ---
 
