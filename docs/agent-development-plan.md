@@ -1,9 +1,9 @@
 # Huldra Agent Development Plan
 
 > **Status:** Active
-> **Plan ownership:** This document is maintained through discussion with the developer. The developer does not modify the plan independently. Proposed changes, including progress updates, are made by the assistant and applied only after developer confirmation.
+> **Plan ownership:** This is a working document maintained alongside Huldra's implementation. Update progress and settled decisions directly to match the current code and the developer's instructions. Discuss unresolved architectural choices before treating them as settled.
 >
-> **Source synchronization:** Each development iteration is performed on a new Git branch. The active branch name must be explicitly provided before development continues. The active branch is the source of truth for all code and plan-related inspection.
+> **Source synchronization:** The local project files are the source of truth. Inspect the current working directory before making changes and work in the existing checkout by default. Creating a branch, pushing changes, or switching checkouts is only done when the developer asks.
 
 ---
 
@@ -862,4 +862,4 @@ UI
 
 Do not prematurely implement higher layers when the lower-layer contract is still unstable.
 
-When a design decision requires changing this plan, propose the change first. The plan is updated only after explicit confirmation.
+Keep this plan synchronized with the implementation: update progress and completion notes in the same development iteration as the related code changes. When an implementation request leaves a significant architectural choice unresolved, explain the options and get the developer's direction before committing to one.

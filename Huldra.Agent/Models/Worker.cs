@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace Huldra.Agent.Models;
 
 /// <summary>
@@ -14,7 +16,7 @@ public sealed class Worker
     /// <summary>
     /// Tool identifiers actually granted by Runtime.
     /// </summary>
-    public required IReadOnlySet<string> GrantedTools { get; init; }
+    public required FrozenSet<string> GrantedTools { get; init; }
 
     public required WorkerContext Context { get; init; }
 
