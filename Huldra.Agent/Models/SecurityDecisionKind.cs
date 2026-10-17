@@ -4,6 +4,5 @@ public enum SecurityDecisionKind
 {
     Allow,
     Deny,
-    Ask,
-    Auto
+    Ask
 }

@@ -5,7 +5,7 @@ namespace Huldra.Agent.Models;
 /// </summary>
 public sealed class SecurityRule
 {
-    public required SecurityDecisionKind Decision { get; init; }
+    public required SecurityPolicyAction Decision { get; init; }
 
     /// <summary>
     /// A locked rule cannot be overridden by a more specific policy scope.

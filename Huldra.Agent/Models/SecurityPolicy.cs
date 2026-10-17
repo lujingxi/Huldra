@@ -6,7 +6,7 @@ namespace Huldra.Agent.Models;
 /// </summary>
 public sealed class SecurityPolicy
 {
-    public SecurityDecisionKind Overall { get; init; } = SecurityDecisionKind.Ask;
+    public SecurityPolicyAction Overall { get; init; } = SecurityPolicyAction.Ask;
 
     public required IReadOnlyDictionary<string, SecurityRule> Rules { get; init; }
 }
